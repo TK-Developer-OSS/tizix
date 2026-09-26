@@ -1,0 +1,15 @@
+int strlen(char *s);
+char *strcpy(char *dst, char *src);
+char *strncpy(char *dst, char *src, int n);
+char *strcat(char *dst, char *src);
+char *strncat(char *dst, char *src, int n);
+int strcmp(char *a, char *b);
+int strncmp(char *a, char *b, int n);
+char *strchr(char *s, int c);
+char *strrchr(char *s, int c);
+char *strstr(char *hay, char *needle);
+char *memset(char *p, int c, int n);
+char *memcpy(char *dst, char *src, int n);
+char *memmove(char *dst, char *src, int n);
+char *memchr(char *s, int c, int n);
+int memcmp(char *a, char *b, int n);

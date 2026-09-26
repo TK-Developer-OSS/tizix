@@ -1,0 +1,3 @@
+# tizix startup (line<48B)
+echo rc: started
+rsyslog rc-ok

@@ -1,0 +1,2 @@
+tizix / x86-ia16 : FAT12 volume OK.
+This file was read by FatFs (ff.c) over the BIOS INT 13h floppy driver.

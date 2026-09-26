@@ -1,0 +1,16 @@
+# vi の関数単位オーバーレイ (tizix #69)。ovlsplit.py が読む。
+#   1 行 = 1 オーバーレイ(行の順番が番号 1..)。先頭の関数が入口、残りは下請け。
+#   領域の大きさは「最大のオーバーレイ」で決まる。細かく刻むほど core が広く取れる。
+#   オーバーレイどうしは呼び合えない(呼んだ瞬間に自分が上書きされる)。
+#   挿入モード(do_ins)は TK 指示で常駐(i/a/o の操作性)。
+vi_init
+load_file
+ex_line
+ex_run save_file
+do_undo
+op_dd
+op_yy yank_line
+paste_line
+go_line line_at
+mv_end
+cnt_digit

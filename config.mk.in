@@ -1,0 +1,12 @@
+# config.mk - ./configure が生成する(#73)。手で直さず ./configure をやり直す。
+#   ルート Makefile と python/run_regress.sh が読む。無くても動く
+#   (その場合はツールが PATH に入っている前提)。
+SDCC_BIN      = @SDCC_BIN@
+M68K_BIN      = @M68K_BIN@
+Z80PACK_DIR   = @Z80PACK_DIR@
+TZ_EXTRA_PATH = @TZ_EXTRA_PATH@
+
+ifneq ($(strip $(TZ_EXTRA_PATH)),)
+export PATH := $(TZ_EXTRA_PATH):$(PATH)
+endif
+export SDCC_BIN
