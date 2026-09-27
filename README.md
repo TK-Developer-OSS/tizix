@@ -123,8 +123,6 @@ python3 python/test_args.py m68k-mega             # cross-target tests take the 
 | `tzcc/` | tzcc, our C compiler for the Z80 (it also has an x86-64 backend, used only to test itself with `make x86test`) |
 | `python/` | Tests and debugging tools (`tz80.py` is a single-step Z80 debugger) |
 | `docker/` | The Dockerfile and helper scripts |
-| `DEVELOP.md` | Development notes and design discussions (in Japanese) |
-| `task.md` | Our task tracker (in Japanese) |
 
 ## Things to watch out for
 
@@ -136,6 +134,8 @@ python3 python/test_args.py m68k-mega             # cross-target tests take the 
 ## Credits
 
 - **TK** — project owner; wrote the very early code, and steers the design and the real-hardware work.
+            @TK_Developer  https://x.com/TK_Developer
+
 - **Google Gemini** (AI Mode)
 - **Anthropic Claude** — Claude Sonnet 5, Claude Opus 5 and Claude Opus 5.5
 
