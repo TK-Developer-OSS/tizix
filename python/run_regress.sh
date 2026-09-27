@@ -6,7 +6,7 @@
 #       sh python/run_regress.sh --build    … make してから回す
 #       sh python/run_regress.sh --clean    … make cleandisk(mkfs からやり直し)してから回す
 #
-#   各テストのログは /tmp/tizix_regress/<name>.log。
+#   各テストのログは build/regress/<YYYYMMDD>/<name>.log(日付で古さを判断して捨てる)。
 #   最後に PASS/FAIL の一覧と総合結果を出す(全部 PASS で終了コード 0)。
 set -u
 
@@ -20,7 +20,7 @@ if [ -f "$TIZIX/config.mk" ]; then
     SDCC_BIN=$(sed -n 's/^SDCC_BIN *= *//p' "$TIZIX/config.mk")
     [ -n "$SDCC_BIN" ] && export SDCC_BIN
 fi
-LOGDIR=/tmp/tizix_regress
+LOGDIR=$TIZIX/build/regress/$(date +%Y%m%d)
 mkdir -p "$LOGDIR"
 
 case "${1:-}" in
@@ -61,7 +61,7 @@ if sh "$TIZIX/python/run_dev_dd_check.sh"; then :; else rc=1; fi
 # DRIVER.BIN は 0x9000 から 4096B しか載らない。溢れてもリンクは通り、
 # 実行時に末尾の関数へ飛んだ瞬間に落ちる ── ビルドの度に見ておく。
 echo "=== driver size guard (l__CODE must be <= 0x1000) ==="
-DMAP="$TIZIX/arch/z80pack/user/driver.map"
+DMAP="$TIZIX/build/arch/z80pack/user/driver.map"
 if [ -f "$DMAP" ]; then
     L=$(awk '$2=="l__CODE"{print $1}' "$DMAP")
     if [ -n "$L" ] && [ "$((0x$L))" -le 4096 ]; then
@@ -75,7 +75,7 @@ else
 fi
 # #87: z80board は block1 の末尾 0x9F00-0x9FFF を FT245 受信リングに使うので、
 # DRIVER は 0xF00 未満でなければならない(越えると受信バイトが DRIVER のコードを壊す)。
-ZDMAP="$TIZIX/arch/z80board/user/driver.map"
+ZDMAP="$TIZIX/build/arch/z80board/user/driver.map"
 if [ -f "$ZDMAP" ]; then
     L=$(awk '$2=="l__CODE"{print $1}' "$ZDMAP")
     if [ -n "$L" ] && [ "$((0x$L))" -le 3840 ]; then
@@ -94,7 +94,7 @@ echo "=== z80board ROM guard (kernel must fit 0x8000) ==="
 if OUT=$(make -C "$TIZIX/arch/z80board" boot.rom 2>&1); then
     # boot.rom が最新だと make は何も言わないので、空きは kernel.ihx から毎回数える
     # (空きが十数バイトしか無い時期があるので、毎回見えるようにしておく)。
-    python3 - "$TIZIX/arch/z80board/obj/kernel.ihx" <<'PY'
+    python3 - "$TIZIX/build/arch/z80board/obj/kernel.ihx" <<'PY'
 import sys
 m = 0
 for l in open(sys.argv[1]):

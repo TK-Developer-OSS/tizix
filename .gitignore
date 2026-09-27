@@ -34,9 +34,6 @@ arch/z80board/z80boardsim
 
 
 __pycache__/
-arch/*/obj/
-arch/z80pack/user/
-arch/z80board/user/
 *.lk
 *.rom
 fatimg_z80board.raw
@@ -47,7 +44,6 @@ python/tz80_state/
 
 # tzcc(tizix/tzcc/ に同居)自身のビルド成果物
 tzcc/tzcc
-tzcc/arch/
 tzcc/ast.txt
 tzcc/compile.log
 tzcc/trace.log
@@ -62,6 +58,8 @@ tzcc/prog.*
 arch/z80pack/receive
 # 実機向けの取り出し物(rom.h / SD イメージ)
 /out/
+# ビルド生成物は全部ここ: build/arch/<arch>/{obj,user}、回帰ログ build/regress/<YYYYMMDD>/
+/build/
 # docker/build.sh が組むビルドコンテキスト
 /docker/ctx/
 # Mega スケッチ(#95): rom.h は make が置く生成物、build/ は build_and_flash.ps1 の出力

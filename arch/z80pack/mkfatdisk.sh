@@ -18,10 +18,13 @@ set -e
 cd "$(dirname "$0")/../.."          # repo ルート基準
 DSK=arch/z80pack/disks/driveb.dsk
 IMG=fatimg.raw
-MTOOLSRC_FILE=/tmp/tizix_mtoolsrc
+# mtoolsrc は中間物として build/arch/z80pack/obj/ へ(/tmp の固定名は別ユーザーの
+# 残骸で Permission denied になった)。
+mkdir -p build/arch/z80pack/obj
+MTOOLSRC_FILE=$PWD/build/arch/z80pack/obj/mtoolsrc
 
-# /bin へ入れるコマンド: arch/z80pack/user/*.bin を全部そのまま配置する
-#   (driver.bin 含む)。ビルド生成物は user/Makefile が arch/z80pack/user/ へ
+# /bin へ入れるコマンド: build/arch/z80pack/user/*.bin を全部そのまま配置する
+#   (driver.bin 含む)。ビルド生成物は user/Makefile が build/arch/z80pack/user/ へ
 #   出力する(user/ にはソースだけ)。
 #   個別リストは持たない。足し忘れると「ビルドは通るがディスクに載らない」で
 #   ハマる(#24 で新コマンドが載らず、旧 tail.bin の無限ループを踏んだ)。
@@ -48,7 +51,7 @@ sync_bin_dir() {
 	mmd -D s x:var/log 2>/dev/null || true
 	# *.ovl は関数単位オーバーレイ(#69、vi01.ovl 等)。本体が実行中に
 	#   /bin/<cmd>NN.ovl を読みに来るので、本体と同じ場所に置く。
-	for b in arch/z80pack/user/*.bin arch/z80pack/user/*.ovl; do
+	for b in build/arch/z80pack/user/*.bin build/arch/z80pack/user/*.ovl; do
 		[ -f "$b" ] || continue
 		mcopy -o "$b" "x:bin/$(basename "$b")"
 	done

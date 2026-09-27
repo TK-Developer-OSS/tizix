@@ -2,13 +2,13 @@
 # tizix - external command build (function pointer table version)
 #===================================================================
 #
-#   ビルド生成物は **すべて** $(OBJ) = arch/$(ARCH)/user/ に集約する。
+#   ビルド生成物は **すべて** $(OBJ) = build/arch/$(ARCH)/user/ に集約する。
 #   user/ にはソース(.c / .h / .s / .py)だけを置き、汚さない。
 #   (サブ make は user/ で実行されるので $(OBJ) は相対パス。
 #    DRIVEB = ../arch/$(ARCH)/disks/... と同じ流儀)
 #   ARCH はルート Makefile から ARCH=$(ARCH) で渡る(単体実行時は既定 z80pack)。
 #
-#   カーネルの中間物 arch/$(ARCH)/obj/ とは別ディレクトリ。
+#   カーネルの中間物 build/arch/$(ARCH)/obj/ とは別ディレクトリ。
 #   `make clean` は $(OBJ) を丸ごと消す(次ビルドで作り直す)。
 
 # ---- toolchain ----
@@ -22,7 +22,7 @@ PYTHON  := python3
 ARCH ?= z80pack
 
 # ---- 出力ディレクトリ ----
-OBJ := ../arch/$(ARCH)/user
+OBJ := ../build/arch/$(ARCH)/user
 
 # ---- flags ----
 # ユーザーコマンドは crt0cmd.s 側のスタック受け渡し仕様との互換性のため --sdcccall 0
@@ -69,7 +69,7 @@ FIXED_SYMS := \
 # ---- commands ----
 #   coreutils(cat/cp/ls/echo/head/tail/wc/... 21 本)は #26 で tzcc ビルドへ移行。
 #   tizix トップ Makefile の `tzcc-cmds` が tzcc/ の tizixcmds を叩き、
-#   arch/z80pack/user/*.bin を直接吐く。ここは sh + 開発スクラッチ + DRIVER のみ。
+#   build/arch/z80pack/user/*.bin を直接吐く。ここは sh + 開発スクラッチ + DRIVER のみ。
 CRT0     := crt0cmd
 #   wifi は z80board 専用(ESP-WROOM-02 へ AT コマンドを 1 行通すだけの小物。
 #   cpmsim の port 50/51 には AT パーサが居ないので z80pack では意味が無い)。
@@ -84,7 +84,8 @@ LIBRELS_test1 := $(OBJ)/string.rel $(OBJ)/stdlib.rel
 
 # driveb(FAT) 配置
 DRIVEB := ../arch/$(ARCH)/disks/driveb.dsk
-MTOOLSRC_FILE := /tmp/tizix_mtoolsrc
+MTOOLSRC_DIR  := ../build/arch/$(ARCH)/obj
+MTOOLSRC_FILE := $(MTOOLSRC_DIR)/mtoolsrc
 
 .PHONY: all clean install disk reinstall rebuild test-iy
 .SECONDARY:
@@ -112,6 +113,7 @@ reinstall:
 # はともに /bin から開く)。
 install: test-iy $(BINS) $(OBJ)/driver.bin
 	@test -f $(DRIVEB) || { $(MAKE) disk; }
+	@mkdir -p $(MTOOLSRC_DIR)
 	@printf 'drive x: file="%s" exclusive\n' "$(abspath $(DRIVEB))" > $(MTOOLSRC_FILE)
 	@MTOOLS_SKIP_CHECK=1 MTOOLSRC=$(MTOOLSRC_FILE) sh -c '\
 		mmd x:bin 2>/dev/null || true; mmd x:root 2>/dev/null || true; \
@@ -165,9 +167,9 @@ $(OBJ)/drvvec.rel: drvvec.s | $(OBJ)
 #    sdld の `-g sym=val` は「参照されている未定義シンボルに値を与える」ものなので、
 #    誰も参照していない名前を渡すと `No definition of symbol ...` でリンクが落ちる。
 #    (#32 で driver.c が vfs_resolve を呼ばなくなった際にこれを踏んだ)
-FS_SYMS = $(shell awk '$$2=="__f_open"||$$2=="_f_open"{print "-g _f_open=0x"$$1} $$2=="__f_close"||$$2=="_f_close"{print "-g _f_close=0x"$$1} $$2=="__f_read"||$$2=="_f_read"{print "-g _f_read=0x"$$1} $$2=="__f_write"||$$2=="_f_write"{print "-g _f_write=0x"$$1} $$2=="__f_lseek"||$$2=="_f_lseek"{print "-g _f_lseek=0x"$$1} $$2=="__f_sync"||$$2=="_f_sync"{print "-g _f_sync=0x"$$1} $$2=="__proc_block"||$$2=="_proc_block"{print "-g _proc_block=0x"$$1} $$2=="__proc_wake"||$$2=="_proc_wake"{print "-g _proc_wake=0x"$$1} $$2=="__kdir_open"||$$2=="_kdir_open"{print "-g _kdir_open=0x"$$1} $$2=="__kdir_read"||$$2=="_kdir_read"{print "-g _kdir_read=0x"$$1} $$2=="__kdir_close"||$$2=="_kdir_close"{print "-g _kdir_close=0x"$$1} $$2=="__kfs_mkdir"||$$2=="_kfs_mkdir"{print "-g _kfs_mkdir=0x"$$1} $$2=="__kfs_unlink"||$$2=="_kfs_unlink"{print "-g _kfs_unlink=0x"$$1} $$2=="__kfs_rename"||$$2=="_kfs_rename"{print "-g _kfs_rename=0x"$$1} $$2=="_kexec_argv"{print "-g _kexec_argv=0x"$$1} $$2=="_builtin_try"{print "-g _builtin_try=0x"$$1} $$2=="_builtin_is"{print "-g _builtin_is=0x"$$1} $$2=="_redir_begin"{print "-g _redir_begin=0x"$$1} $$2=="_redir_end"{print "-g _redir_end=0x"$$1} $$2=="_in_begin"{print "-g _in_begin=0x"$$1} $$2=="_in_end"{print "-g _in_end=0x"$$1} $$2=="_pipe_setup"{print "-g _pipe_setup=0x"$$1} $$2=="_pipe_attach_writer"{print "-g _pipe_attach_writer=0x"$$1} $$2=="_pipe_teardown"{print "-g _pipe_teardown=0x"$$1} $$2=="_pipe_note_exit"{print "-g _pipe_note_exit=0x"$$1} $$2=="_pipe_ovf"{print "-g _pipe_ovf=0x"$$1} $$2=="_pipe_tail"{print "-g _pipe_tail=0x"$$1} $$2=="_krun_pipe"{print "-g _krun_pipe=0x"$$1} $$2=="_kdir_size"{print "-g _kdir_size=0x"$$1} $$2=="_kpath"{print "-g _kpath=0x"$$1} $$2=="_kchdir"{print "-g _kchdir=0x"$$1} $$2=="_kgetcwd"{print "-g _kgetcwd=0x"$$1} $$2=="_con_break"{print "-g _con_break=0x"$$1} $$2=="_con_pending"{print "-g _con_pending=0x"$$1} $$2=="_krun_wait"{print "-g _krun_wait=0x"$$1} $$2=="_klog_write"{print "-g _klog_write=0x"$$1} $$2=="_kfs_df"{print "-g _kfs_df=0x"$$1} $$2=="__kdev_open"||$$2=="_kdev_open"{print "-g _kdev_open=0x"$$1} $$2=="__kdev_stream"||$$2=="_kdev_stream"{print "-g _kdev_stream=0x"$$1} $$2=="__kdev_seek"||$$2=="_kdev_seek"{print "-g _kdev_seek=0x"$$1} $$2=="__kdev_tell"||$$2=="_kdev_tell"{print "-g _kdev_tell=0x"$$1}' ../arch/$(ARCH)/obj/kernel.map 2>/dev/null)
+FS_SYMS = $(shell awk '$$2=="__f_open"||$$2=="_f_open"{print "-g _f_open=0x"$$1} $$2=="__f_close"||$$2=="_f_close"{print "-g _f_close=0x"$$1} $$2=="__f_read"||$$2=="_f_read"{print "-g _f_read=0x"$$1} $$2=="__f_write"||$$2=="_f_write"{print "-g _f_write=0x"$$1} $$2=="__f_lseek"||$$2=="_f_lseek"{print "-g _f_lseek=0x"$$1} $$2=="__f_sync"||$$2=="_f_sync"{print "-g _f_sync=0x"$$1} $$2=="__proc_block"||$$2=="_proc_block"{print "-g _proc_block=0x"$$1} $$2=="__proc_wake"||$$2=="_proc_wake"{print "-g _proc_wake=0x"$$1} $$2=="__kdir_open"||$$2=="_kdir_open"{print "-g _kdir_open=0x"$$1} $$2=="__kdir_read"||$$2=="_kdir_read"{print "-g _kdir_read=0x"$$1} $$2=="__kdir_close"||$$2=="_kdir_close"{print "-g _kdir_close=0x"$$1} $$2=="__kfs_mkdir"||$$2=="_kfs_mkdir"{print "-g _kfs_mkdir=0x"$$1} $$2=="__kfs_unlink"||$$2=="_kfs_unlink"{print "-g _kfs_unlink=0x"$$1} $$2=="__kfs_rename"||$$2=="_kfs_rename"{print "-g _kfs_rename=0x"$$1} $$2=="_kexec_argv"{print "-g _kexec_argv=0x"$$1} $$2=="_builtin_try"{print "-g _builtin_try=0x"$$1} $$2=="_builtin_is"{print "-g _builtin_is=0x"$$1} $$2=="_redir_begin"{print "-g _redir_begin=0x"$$1} $$2=="_redir_end"{print "-g _redir_end=0x"$$1} $$2=="_in_begin"{print "-g _in_begin=0x"$$1} $$2=="_in_end"{print "-g _in_end=0x"$$1} $$2=="_pipe_setup"{print "-g _pipe_setup=0x"$$1} $$2=="_pipe_attach_writer"{print "-g _pipe_attach_writer=0x"$$1} $$2=="_pipe_teardown"{print "-g _pipe_teardown=0x"$$1} $$2=="_pipe_note_exit"{print "-g _pipe_note_exit=0x"$$1} $$2=="_pipe_ovf"{print "-g _pipe_ovf=0x"$$1} $$2=="_pipe_tail"{print "-g _pipe_tail=0x"$$1} $$2=="_krun_pipe"{print "-g _krun_pipe=0x"$$1} $$2=="_kdir_size"{print "-g _kdir_size=0x"$$1} $$2=="_kpath"{print "-g _kpath=0x"$$1} $$2=="_kchdir"{print "-g _kchdir=0x"$$1} $$2=="_kgetcwd"{print "-g _kgetcwd=0x"$$1} $$2=="_con_break"{print "-g _con_break=0x"$$1} $$2=="_con_pending"{print "-g _con_pending=0x"$$1} $$2=="_krun_wait"{print "-g _krun_wait=0x"$$1} $$2=="_klog_write"{print "-g _klog_write=0x"$$1} $$2=="_kfs_df"{print "-g _kfs_df=0x"$$1} $$2=="__kdev_open"||$$2=="_kdev_open"{print "-g _kdev_open=0x"$$1} $$2=="__kdev_stream"||$$2=="_kdev_stream"{print "-g _kdev_stream=0x"$$1} $$2=="__kdev_seek"||$$2=="_kdev_seek"{print "-g _kdev_seek=0x"$$1} $$2=="__kdev_tell"||$$2=="_kdev_tell"{print "-g _kdev_tell=0x"$$1}' ../build/arch/$(ARCH)/obj/kernel.map 2>/dev/null)
 
-$(OBJ)/driver.ihx: $(OBJ)/drvvec.rel $(OBJ)/driver.rel Makefile ../arch/$(ARCH)/obj/kernel.map
+$(OBJ)/driver.ihx: $(OBJ)/drvvec.rel $(OBJ)/driver.rel Makefile ../build/arch/$(ARCH)/obj/kernel.map
 	$(SDLD) -n -i $@ -b _CODE=0x9000 \
 		-g _kputchar=0x003E -g _kgetchar=0x0041 -g _getticks=0x0044 \
 		$(FS_SYMS) \

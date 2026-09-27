@@ -36,7 +36,7 @@ x86をホストとし、Rocky Linux 9を開発環境として与える
 
 ターミナルから書きコマンドでRocky Linux 9に入れるので使用を許可する
 
-ssh -i %USERPROFILE%\.ssh\rocky9_identity.pem  tk@rocky9
+ssh -i <秘密鍵> <ユーザー>@<ビルドホスト>
 
 \\rocky9\tk\z80pack\tzcc
 と

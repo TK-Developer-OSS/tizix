@@ -9,12 +9,13 @@
 #     3) 起動直後に SSH でタイマーが実際に登録されたか確かめ、無ければその場で止めて作業しない。
 #
 #   使い方: AWS_PROFILE=... sh docker/ec2-launch.sh
-#   前提: 大阪(ap-northeast-3)、c7i.2xlarge、Ubuntu 24.04 公式 AMI。鍵は ~/.ssh/tizix-build-osaka.pem。
+#   前提: c7i.2xlarge、Ubuntu 24.04 公式 AMI。リージョンは AWS_REGION(必須)、鍵ペア名は EC2_KEY
+#         (既定 tizix-build。秘密鍵は ~/.ssh/<鍵ペア名>.pem、無ければ作る)。
 set -eu
-export AWS_REGION=${AWS_REGION:-ap-northeast-3}
+export AWS_REGION=${AWS_REGION:?AWS_REGION を指定する(例: AWS_REGION=<リージョン> sh docker/ec2-launch.sh)}
 TYPE=c7i.2xlarge
 NAME=tizix-build
-KEY=tizix-build-osaka
+KEY=${EC2_KEY:-tizix-build}
 PEM=$HOME/.ssh/$KEY.pem
 SG_NAME=tizix-build-ssh
 LIMIT_SEC=21600          # 6 時間(インスタンス内の期限)

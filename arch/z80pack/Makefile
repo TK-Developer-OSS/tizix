@@ -10,7 +10,7 @@ ARCH    = z80pack
 ROOTDIR = $(abspath ../..)
 SRCDIR  = $(ROOTDIR)/src
 USERDIR = $(ROOTDIR)/user
-OBJDIR  = obj
+OBJDIR  = $(ROOTDIR)/build/arch/z80pack/obj
 
 # アーキ識別マクロ(src/ の #if defined(ARCH_*) 分岐用)。
 # sdasz80 は -D 非対応 & asm は arch/ に居るので PLAT_DEF_AS は空。

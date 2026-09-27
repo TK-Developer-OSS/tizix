@@ -6,7 +6,7 @@
 #     ROOTDIR     tizix リポジトリルートへの絶対パス
 #     SRCDIR      共通カーネル src/ への絶対パス
 #     USERDIR     共通 user/ への絶対パス
-#     OBJDIR      中間生成物ディレクトリ(通常 "obj")
+#     OBJDIR      中間生成物ディレクトリ(build/arch/<arch>/obj)
 #     PLAT_DEF / PLAT_DEF_AS   -D 定義 (C / asm)
 #     CODE_LOC / DATA_LOC / NSEC
 #     KOBJ_ARCH   arch 固有カーネルオブジェクト(無ければ空)
@@ -108,7 +108,7 @@ cleandisk:
 
 # coreutils(#26)は tzcc でビルドする。iy_reg 卒業。
 #   tizix リポジトリ同居の tzcc/(既定 $(ROOTDIR)/tzcc)の tizixcmds が
-#   arch/$(ARCH)/user/*.bin を吐き、mkfatdisk.sh がそれを glob する。
+#   build/arch/$(ARCH)/user/*.bin を吐き、mkfatdisk.sh がそれを glob する。
 #   TIZIX_USERBIN/TIZIX_DRIVEB は tzcc 側で ?= 上書き可能な変数
 #   (既定は z80pack 決め打ち)なので、ARCH= に応じて明示的に渡す。
 #   user/ のサブ make は sh + 開発用スクラッチ(hello/a/b/…)+ DRIVER.BIN のみ。
@@ -118,11 +118,11 @@ TZCC_DIR ?= $(ROOTDIR)/tzcc
 tzcc-cmds:
 	@test -d $(TZCC_DIR) || { echo "TZCC_DIR=$(TZCC_DIR) が無い。git clone 先を TZCC_DIR= で指定"; exit 1; }
 	$(MAKE) -C $(TZCC_DIR) tizixcmds TIZIX_ROOT=$(ROOTDIR) \
-		TIZIX_USERBIN=$(CURDIR)/user TIZIX_DRIVEB=$(CURDIR)/$(FATDSK)
+		TIZIX_USERBIN=$(ROOTDIR)/build/arch/$(ARCH)/user TIZIX_DRIVEB=$(CURDIR)/$(FATDSK)
 
 # user/ の sh・スクラッチ・DRIVER.BIN を先に、その後 coreutils を tzcc で
-# 上書き生成(user clean が arch/$(ARCH)/user を消すため順序が重要)。
-# user/Makefile 自体も ARCH= を受けて出力先を arch/$(ARCH)/user へ向ける。
+# 上書き生成(user clean が build/arch/$(ARCH)/user を消すため順序が重要)。
+# user/Makefile 自体も ARCH= を受けて出力先を build/arch/$(ARCH)/user へ向ける。
 user-bins: $(OBJDIR)/kernel.ihx
 	$(MAKE) -C $(USERDIR) ARCH=$(ARCH)
 	$(MAKE) tzcc-cmds

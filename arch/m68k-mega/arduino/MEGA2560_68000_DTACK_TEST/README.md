@@ -144,7 +144,7 @@ readme.mdの残タスクやメモは完了したものは完了とわかるよ�
 まとまったタスクが完了したらbkフォルダ以下ににバックアップを取るように
 
 下記でSSHログインできるからエミュレーション環境を使う許可をする
-ssh -i %USERPROFILE%\.ssh\rocky9_identity.pem tk@rocky9 
+ssh -i <秘密鍵> <ユーザー>@<ビルドホスト> 
 
 ここにArduino用gccやコマンドがある
 %USERPROFILE%\AppData\Local\Arduino15\packages\arduino\tools\avr-gcc\7.3.0-atmel3.6.1-arduino7\bin

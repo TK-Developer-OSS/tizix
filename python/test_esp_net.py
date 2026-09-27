@@ -30,7 +30,7 @@ import time
 
 TIZIX = os.environ.get("TIZIX_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ARCH_DIR = os.path.join(TIZIX, "arch", "z80board")
-SIM_CMD = ["./z80boardsim", "-x", "obj/kernel.ihx"]
+SIM_CMD = ["./z80boardsim", "-x", "../../build/arch/z80board/obj/kernel.ihx"]
 
 MODEM_PORT = 8080
 TARGET_PORT = 9100

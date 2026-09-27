@@ -19,8 +19,8 @@ TIZIX = os.environ.get("TIZIX_ROOT", os.path.dirname(os.path.dirname(os.path.abs
 ARCH = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TIZIX_ARCH", "z80pack")
 SIMS = {
     "z80pack":   ["./cpmsim", "-d", "disks"],
-    "z80board":  ["./z80boardsim", "-x", "obj/kernel.ihx"],
-    "m68k-mega": ["./m68ksim", "obj/kernel.bin", "obj/disk.img"],
+    "z80board":  ["./z80boardsim", "-x", "../../build/arch/z80board/obj/kernel.ihx"],
+    "m68k-mega": ["./m68ksim", "../../build/arch/m68k-mega/obj/kernel.bin", "../../build/arch/m68k-mega/obj/disk.img"],
 }
 
 master, slave = pty.openpty()

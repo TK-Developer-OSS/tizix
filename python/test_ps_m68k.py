@@ -20,7 +20,7 @@ ARCH_DIR = os.path.join(TIZIX, "arch", "m68k-mega")
 
 master, slave = pty.openpty()
 proc = subprocess.Popen(
-    ["./m68ksim", "obj/kernel.bin", "obj/disk.img"], cwd=ARCH_DIR,
+    ["./m68ksim", "../../build/arch/m68k-mega/obj/kernel.bin", "../../build/arch/m68k-mega/obj/disk.img"], cwd=ARCH_DIR,
     stdin=slave, stdout=slave, stderr=slave, close_fds=True,
 )
 os.close(slave)

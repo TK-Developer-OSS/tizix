@@ -17,7 +17,7 @@ LD      = m68k-elf-ld
 OBJCOPY = m68k-elf-objcopy
 HOSTCC  = gcc
 
-OBJ  = obj
+OBJ  = ../../build/arch/m68k-mega/obj
 SRC  = ../../src
 
 # TICK_HZ: レベル6タイマ割込みの周期。カーネルと m68ksim の両方がこの 1 つの値に従う。

@@ -1,8 +1,8 @@
-# ビルド成果物はすべて arch/z80pack/ 以下に出す（src を散らかさない）。
+# ビルド成果物はすべて ../build/tzcc/z80pack/ 以下(tizix 本体の build/ に同居)に出す（src を散らかさない）。
 #   ルートに残すのは実行ファイル tzcc のみ。
 #   ディレクトリ作成は order-only 依存 "| $(BUILD)" で行う（parse 時 mkdir だと
 #   `make clean all` で clean 後に消えたまま all が走り失敗するため）。
-BUILD := arch/z80pack
+BUILD := ../build/tzcc/z80pack
 
 CC = gcc
 CFLAGS = -Wall -Wextra -g
@@ -72,7 +72,7 @@ $(BUILD)/%.o: %.c | $(BUILD)
 
 # ---- Z80 スタートアップ ----
 # sdasz80 は .lst / .sym をソースと同じディレクトリに吐くので、
-# ソースを $(BUILD)/ にコピーしてからアセンブルし、副産物も全部 arch/z80pack/ に集める。
+# ソースを $(BUILD)/ にコピーしてからアセンブルし、副産物も全部 $(BUILD)/ に集める。
 $(BUILD)/crt0.rel: crt0.s | $(BUILD)
 	cp $< $(BUILD)/crt0.s
 	$(AS) -g -o $@ $(BUILD)/crt0.s
@@ -178,8 +178,8 @@ tizix: $(TARGET) $(BUILD)/crt0_tizix.rel $(BUILD)/libtzc.lib
 	$(LD) -n -i -b _CODE=0x0000 $(TZVEC) $(BUILD)/prog.ihx $(BUILD)/crt0_tizix.rel $(BUILD)/prog.rel -k $(BUILD) -l libtzc.lib
 	$(MAKEBIN) -p $(BUILD)/prog.ihx $(BUILD)/prog.bin
 	$(eval BINNAME := $(shell basename $(TEST_SRC) .c | tr -cd 'A-Za-z0-9' | cut -c1-8 | tr A-Z a-z))
-	@printf 'drive x: file="%s" exclusive\n' "$(abspath $(DRIVEB))" > /tmp/tzcc_mtoolsrc
-	MTOOLS_SKIP_CHECK=1 MTOOLSRC=/tmp/tzcc_mtoolsrc $(MCOPY) -o $(BUILD)/prog.bin x:bin/$(BINNAME).bin
+	@printf 'drive x: file="%s" exclusive\n' "$(abspath $(DRIVEB))" > $(BUILD)/mtoolsrc
+	MTOOLS_SKIP_CHECK=1 MTOOLSRC=$(BUILD)/mtoolsrc $(MCOPY) -o $(BUILD)/prog.bin x:bin/$(BINNAME).bin
 	@echo ""
 	@echo ">>> $(BINNAME).bin ($$(stat -c %s $(BUILD)/prog.bin) bytes) を $(DRIVEB) の /bin に転送しました"
 	@echo ">>> 'make tizixrun' で Tizix 起動 → シェルで  $(BINNAME)  と入力"
@@ -241,16 +241,16 @@ tizixcmd: $(TARGET) $(BUILD)/crt0_tizix.rel $(BUILD)/libtzc.lib $(if $(OVLVEC),$
 	@if [ -n "$(TIZIX_USERBIN)" ]; then mkdir -p $(TIZIX_USERBIN); cp $(TZCMD_DIR)/$(CMD).bin $(TIZIX_USERBIN)/$(CMD).bin; \
 		echo ">>> $(CMD).bin ($$(stat -c %s $(TZCMD_DIR)/$(CMD).bin) bytes) -> $(TIZIX_USERBIN)/$(CMD).bin"; fi
 	@if [ -z "$(NOCOPY)" ]; then \
-		printf 'drive x: file="%s" exclusive\n' "$(abspath $(TIZIX_DRIVEB))" > /tmp/tzcc_mtoolsrc; \
-		MTOOLS_SKIP_CHECK=1 MTOOLSRC=/tmp/tzcc_mtoolsrc $(MCOPY) -o $(TZCMD_DIR)/$(CMD).bin x:bin/$(CMD).bin; \
+		printf 'drive x: file="%s" exclusive\n' "$(abspath $(TIZIX_DRIVEB))" > $(BUILD)/mtoolsrc; \
+		MTOOLS_SKIP_CHECK=1 MTOOLSRC=$(BUILD)/mtoolsrc $(MCOPY) -o $(TZCMD_DIR)/$(CMD).bin x:bin/$(CMD).bin; \
 		echo ">>> $(CMD).bin ($$(stat -c %s $(TZCMD_DIR)/$(CMD).bin) bytes) -> $(TIZIX_DRIVEB) /bin/$(CMD).bin"; \
 	fi
 
 # ---- coreutils 一括ビルド（#26: iy_reg 卒業） ----
 # 使用例: make tizixcmds TIZIX_ROOT=/abs/path/to/tizix
-#   TIZIX_USERBIN が指す先（既定 $(TIZIX_ROOT)/arch/z80pack/user）へ .bin を置く。
+#   TIZIX_USERBIN が指す先（既定 $(TIZIX_ROOT)/build/arch/z80pack/user）へ .bin を置く。
 #   tizix 側 mkfatdisk.sh がそこを glob して driveb.dsk /bin へ載せる。
-TIZIX_USERBIN ?= $(TIZIX_ROOT)/arch/z80pack/user
+TIZIX_USERBIN ?= $(TIZIX_ROOT)/build/arch/z80pack/user
 TIZIX_CMDS    ?= calli cat cp date dd df du echo free grep head history id ls mkdir mv rm rmdir rsyslog sed sleep spawn spawnc tail tee touch uname uniq uptime wc whoami
 # オーバーレイ → core ベクタ (#36 続き) を持つコマンド。「名前:OVLVEC 番地」。
 #   番地はオーバーレイ領域の直下(OVLADDR - 24)。a43eb6c で ovlmain にベクタを

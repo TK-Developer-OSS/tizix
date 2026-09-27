@@ -22,7 +22,8 @@ set -e
 cd "$(dirname "$0")/../.."          # repo ルート基準
 DSK=arch/z80board/sdcard.img
 IMG=fatimg_z80board.raw
-MTOOLSRC_FILE=/tmp/tizix_z80board_mtoolsrc
+mkdir -p build/arch/z80board/obj
+MTOOLSRC_FILE=$PWD/build/arch/z80board/obj/mtoolsrc
 
 # SD カードイメージのサイズ(セクタ数、512B/sector)。実機は SD カードそのもの
 # なので floppy のような上限は無い。当面 8192 セクタ = 4MB(vi/coreutils の
@@ -30,9 +31,9 @@ MTOOLSRC_FILE=/tmp/tizix_z80board_mtoolsrc
 # dd でこの生イメージをそのまま SD カードへ書けばよい。
 NSECT=8192
 
-# /bin へ入れるコマンド: arch/z80board/user/*.bin を全部そのまま配置する
+# /bin へ入れるコマンド: build/arch/z80board/user/*.bin を全部そのまま配置する
 #   (driver.bin 含む)。ビルド生成物は user/Makefile(ARCH=z80board)が
-#   arch/z80board/user/ へ出力する(user/ にはソースだけ)。
+#   build/arch/z80board/user/ へ出力する(user/ にはソースだけ)。
 #   個別リストは持たない(z80pack 版と同じ理由。#24 の教訓)。
 #   sh は z80 で外部コマンド化。init(PID 1)が /bin/sh.bin をロード・respawn する。
 
@@ -52,7 +53,7 @@ sync_bin_dir() {
 	mmd -D s x:var  2>/dev/null || true  # /var/log (rsyslog / klog_write)
 	mmd -D s x:var/log 2>/dev/null || true
 	# *.ovl は関数単位オーバーレイ(#69、vi01.ovl 等)。本体と同じ /bin へ。
-	for b in arch/z80board/user/*.bin arch/z80board/user/*.ovl; do
+	for b in build/arch/z80board/user/*.bin build/arch/z80board/user/*.ovl; do
 		[ -f "$b" ] || continue
 		mcopy -o "$b" "x:bin/$(basename "$b")"
 	done

@@ -34,14 +34,14 @@ DRIVEB_SIZE = 256256
 #   既存の pty テスト(test_vi 等)を実機相当の SD/SPI ドライバ経路で回せる。
 if ARCH == "z80board":
     DRIVEB = os.path.join(ARCH_DIR, "sdcard.img")
-    CPMSIM_CMD = ["./z80boardsim", "-x", "obj/kernel.ihx"]
+    CPMSIM_CMD = ["./z80boardsim", "-x", "../../build/arch/z80board/obj/kernel.ihx"]
     DRIVEB_SIZE = None
 
 # m68k-mega: m68ksim(カーネル像 + FAT ディスク)。TIZIX_ARCH=m68k-mega で
 #   z80 用の pty テストがそのまま m68ksim で回る(落ちたものがアーキ間の差)。
 if ARCH == "m68k-mega":
-    DRIVEB = os.path.join(ARCH_DIR, "obj", "disk.img")
-    CPMSIM_CMD = ["./m68ksim", "obj/kernel.bin", "obj/disk.img"]
+    DRIVEB = os.path.join(TIZIX, "build", "arch", ARCH, "obj", "disk.img")
+    CPMSIM_CMD = ["./m68ksim", "../../build/arch/m68k-mega/obj/kernel.bin", "../../build/arch/m68k-mega/obj/disk.img"]
     DRIVEB_SIZE = None
 
 

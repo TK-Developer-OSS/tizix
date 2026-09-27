@@ -121,7 +121,7 @@ ARCH_M68K_MEGA 分岐のコメントに詳細あり)。もう一つ: Makefile �
 　何をやってもよい許可をする
 
 ・動作確認はSSHを許可するので、かならずz80pack ./cpmsimで動作を確認すること
-ssh -i %USERPROFILE%\.ssh\rocky9_identity.pem tk@rocky9
+ssh -i <秘密鍵> <ユーザー>@<ビルドホスト>
 
 ~/z80pack/tizix
 と
@@ -1465,7 +1465,7 @@ _skip_jump:
   (bios.s と同じ無条件 OUT/IN 方式で確定)。
 
 ### 4.4 環境メモ
-- rocky9 への SSH: `ssh -i "$HOME/.ssh/rocky9_identity.pem" tk@rocky9`
+- rocky9 への SSH: `ssh -i <秘密鍵> <ユーザー>@<ビルドホスト>`
   (Windows Git Bash から)。
 - `\\rocky9\tk\z80pack\tizix`(Windows から SMB 経由、編集用)と
   `~/z80pack/tizix`(rocky9 上、`make`/実行用)は同一ファイル

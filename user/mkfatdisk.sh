@@ -9,10 +9,11 @@ DSK=disks/driveb.dsk
 dd if=/dev/zero of="$IMG" bs=512 count=500 status=none
 mkfs.fat -F 12 -S 512 -n TIZIX "$IMG" >/dev/null
 export MTOOLS_SKIP_CHECK=1
-cat > /tmp/mtoolsrc <<RC
+mkdir -p build
+cat > build/mtoolsrc <<RC
 drive x: file="$PWD/$IMG" exclusive
 RC
-export MTOOLSRC=/tmp/mtoolsrc
+export MTOOLSRC="$PWD/build/mtoolsrc"
 # 入れたいコマンドをここに追加
 mcopy -o user/hello.bin  x:HELLO.BIN
 mcopy -o user/a.bin      x:A.BIN

@@ -11,7 +11,7 @@
 #          tests/run_rt.sh ok_18 ok_20  指定分のみ
 set -u
 cd "$(dirname "$0")/.."
-BUILD=arch/z80pack
+BUILD=../build/tzcc/z80pack
 # SDCC は SDCC_BIN(tzcc/Makefile と同じ変数)か、無ければ PATH の sdasz80 の場所(#21)。
 SDCC=${SDCC_BIN:-$(dirname "$(command -v sdasz80 2>/dev/null || echo /nonexistent/sdasz80)")}
 [ -x "$SDCC/sdasz80" ] || { echo "sdasz80 が見つからない(PATH か SDCC_BIN= で指定)"; exit 1; }

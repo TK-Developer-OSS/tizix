@@ -13,9 +13,9 @@ cd $HOME/z80pack/tizix || exit 1
 make ARCH=z80board 2>&1 | tail -40
 
 echo "=== 2. 生成物のサイズ ==="
-ls -l arch/z80board/user/net.bin arch/z80board/user/wifi.bin 2>&1
+ls -l build/arch/z80board/user/net.bin build/arch/z80board/user/wifi.bin 2>&1
 ls -l arch/z80board/boot.rom arch/z80board/sdcard.img 2>&1
-grep -E "l__CODE|_CODE " arch/z80board/user/net.map 2>/dev/null | head -3
+grep -E "l__CODE|_CODE " build/arch/z80board/user/net.map 2>/dev/null | head -3
 
 echo ALLDONE
 touch "$HOME/tmp/DONE"

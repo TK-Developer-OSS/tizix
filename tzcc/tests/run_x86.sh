@@ -3,7 +3,7 @@
 #              gcc でリンクしてネイティブ実行、// EXPECT: と実出力を照合する。
 set -u
 cd "$(dirname "$0")/.."
-BUILD=arch/z80pack
+BUILD=../build/tzcc/z80pack
 mkdir -p "$BUILD"
 make -s tzcc >/dev/null 2>&1 || { echo "tzcc build failed"; exit 1; }
 
