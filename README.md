@@ -47,6 +47,61 @@ BLK ST CMD ARGS
 - **Z80 programs can run anywhere in memory.** They're position-independent code based on the IY register, so they work wherever they land in the 4KB blocks — no relocation at load time. The Z80 commands are built with **tzcc** (`tzcc/`), our own **C compiler for the Z80**, which spits out IY-relative code directly. The Z80 kernel and a few commands use SDCC. On the 68000, gcc's `-mpcrel` does the same trick, so tzcc isn't used there.
 - **No memory protection** — on purpose. Big programs fit into small slots by splitting into processes, sharing memory, and using overlays.
 
+## Try it first
+
+If you just want to play with tizix, you don't need to clone anything or build anything — Docker is all it takes, and that includes Docker Desktop on Windows. The `tizix` image has prebuilt kernels, disk images and all three simulators. It doesn't include a compiler, so you can't `make` inside it. For that, see [Building](#building).
+
+To keep your files and changes between sessions, run the container in the background with a specific name. You can safely access it using `docker exec`.
+
+** NOTE.
+This guide assumes that you already have**Docker (including Docker Desktop) installed on Windows 11**. 
+
+
+**1. Start the container in the background:**
+```sh
+docker run -itd --name tizix tkdevelopeross/tizix:latest
+```
+
+**2. Log into the container as the `tizix` user:**
+```sh
+docker exec -it -u tizix tizix /bin/bash
+```
+
+**3. Manage the container lifecycle:**
+```sh
+docker stop tizix   # Stop the container without losing your data
+docker start tizix  # Resume right where you left off
+```
+
+Once you're in as `tizix`, one command boots tizix:
+
+| Command | What boots | To quit |
+|---|---|---|
+| `tizix` | z80pack (cpmsim, Z80) | Ctrl+\ |
+| `tizix z80board` | the homebrew Z80 board (z80boardsim) | Ctrl+\ |
+| `tizix m68k` | m68k-mega (m68ksim, 68000) | Ctrl+] |
+| `tizix reset` | nothing — it puts the disk images back the way they shipped | — |
+
+You get the shell prompt `[/root]#`. Some things to try: `ls /bin`, `echo hello | cat`, `sleep 30 &` then `ps` and `kill`, `vi memo.txt`, `cat /etc/rc`. Typing `exit` in sh won't close the simulator, because init just starts sh again, so use the quit keys above. Any files you change stay on the disk images until you run `tizix reset`. The source is in `~/tizix`, and `~/README.txt` has the same notes.
+
+
+Cleanup / Uninstallation
+
+If you want to completely remove `tizix` from your system, run the following commands:
+
+**1. Stop and remove the container:**
+```sh
+docker stop tizix
+docker rm tizix
+```
+
+**2. Remove the downloaded Docker image:**
+```sh
+docker rmi tkdevelopeross/tizix:latest
+```
+
+
+
 ## Building
 
 ### What you need
@@ -85,8 +140,9 @@ make ARCH=m68k-mega       # m68k-mega: kernel, m68ksim and the disk image
 
 There's a Dockerfile in `docker/` (Ubuntu 24.04) with the whole toolchain baked in: the official SDCC 4.5.0 binaries, m68k-elf binutils 2.30 + gcc 8.3.0 built from pinned GNU sources, and the simulators. The tizix source isn't inside the image — just mount your tree at `/tizix`. Podman works too (add `:Z` to the mount on SELinux).
 
+#### build all three targets and run the regression suite
 ```sh
-docker run --rm -v "$PWD":/tizix tizix              # build all three targets and run the regression suite
+docker run --rm -v "$PWD":/tizix tizix
 docker run --rm -v "$PWD":/tizix tizix make ARCH=z80board
 docker run --rm -it -v "$PWD":/tizix tizix make run # boot z80pack and play with it
 ```

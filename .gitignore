@@ -62,6 +62,7 @@ arch/z80pack/receive
 /build/
 # docker/build.sh が組むビルドコンテキスト
 /docker/ctx/
+/docker/try/ctx/
 # Mega スケッチ(#95): rom.h は make が置く生成物、build/ は build_and_flash.ps1 の出力
 arch/m68k-mega/arduino/*/rom.h
 arch/m68k-mega/arduino/*/build/

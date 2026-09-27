@@ -1,0 +1,23 @@
+#!/bin/sh
+# tizix お試し: ビルド済みのカーネルとディスク像をシミュレータで起動する
+#   tizix [z80pack|z80board|m68k]   (既定 z80pack)
+#   tizix reset                     ディスク像を配布時の状態に戻す
+T=$HOME/tizix
+P=$T/.pristine
+case "${1:-z80pack}" in
+z80pack)
+    echo "== z80pack (cpmsim)   終了: Ctrl+\\  =="; sleep 1
+    cd "$T/arch/z80pack" && PATH=.:$PATH exec ./cpmsim disks/drivea.dsk disks/driveb.dsk ;;
+z80board)
+    # z80boardsim はカレントの sdcard.img を SD カードとして読む
+    echo "== z80board (z80boardsim)   終了: Ctrl+\\  =="; sleep 1
+    cd "$T/arch/z80board" && exec ./z80boardsim -x ../../build/arch/z80board/obj/kernel.ihx ;;
+m68k|m68k-mega)
+    echo "== m68k-mega (m68ksim)   終了: Ctrl+]  =="; sleep 1
+    cd "$T/arch/m68k-mega" && exec ./m68ksim ../../build/arch/m68k-mega/obj/kernel.bin ../../build/arch/m68k-mega/obj/disk.img ;;
+reset)
+    (cd "$P" && find . -type f) | while read -r f; do cp "$P/$f" "$T/$f"; done
+    echo "ディスク像を初期状態に戻した" ;;
+*)
+    echo "使い方: tizix [z80pack|z80board|m68k|reset]"; exit 1 ;;
+esac
