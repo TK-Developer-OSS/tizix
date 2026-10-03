@@ -56,14 +56,14 @@ struct kpipe {
     unsigned int  head, tail;           /* 0..BUFCAP。count = tail - head(wrap 無し)  */
 };
 
-#if defined(ARCH_M68K_MEGA)
-/* #82: m68k は kwork に 32B 取ってある(src/kmem.h KW_PIPE)。超えたら止める。 */
+#if defined(PLAT_FLAT32)
+/* #82: kwork に 32B 取ってある(src/kmem.h KW_PIPE)。超えたら止める。 */
 typedef char kpipe_fits[(sizeof(struct kpipe) <= 0x20) ? 1 : -1];
 #endif
 
 #define P     ((volatile struct kpipe *)KW_PIPE)
 #define PIDT  ((volatile unsigned char *)KW_PIDTAB)
-#define PBUF(pp) ((volatile unsigned char *)BLOCK_ADDR((pp)->bufblk))   /* #82: z80 = RAM_BASE + n*4KB / m68k = n*32KB */
+#define PBUF(pp) ((volatile unsigned char *)BLOCK_ADDR((pp)->bufblk))   /* #82: z80 = RAM_BASE + n*4KB / PLAT_FLAT32 = plat.h の PLAT_SLOT_ADDR(n) */
 
 /* reader を launch した直後に呼ぶ。バッファブロックを 1 個確保する。
  *   戻り 1=OK / 0=プロセス枠に空きブロック無し(sh は "out of memory")。 */
@@ -235,14 +235,28 @@ void pipe_note_exit(unsigned char blk) __sdcccall(0)
 /* krun_pipe - A | B の結線・監視(#27 で sh から移設)                  */
 /* ================================================================== */
 
-/* "/bin/<name>.bin" を dst[24] へ。name が '/' 始まりならそのまま + ".bin"。 */
+/* "/bin/<name>.bin" を dst[PIPE_FNAME_MAX] へ。name が '/' 始まりならそのまま + ".bin"。
+ * z80(FAT が 8.3)はコマンド名の '-' をディレクトリの区切りに読む(esp32-gpio → /bin/esp32/gpio.bin。#112)。
+ * gcc 系は長いファイル名が使えるので名前のまま(#114)。user/sh.c の bin_path と同じ規則。 */
+#if defined(PLAT_FLAT32)
+#define PIPE_FNAME_MAX 48
+#else
+#define PIPE_FNAME_MAX 24
+#endif
 static void pipe_fname(char *dst, const char *name)
 {
     unsigned char i = 0, j = 0;
+    char c;
     if (name[0] != '/') {
         dst[j++] = '/'; dst[j++] = 'b'; dst[j++] = 'i'; dst[j++] = 'n'; dst[j++] = '/';
     }
-    while (name[i] && j < 18) dst[j++] = name[i++];
+    while (name[i] && j < PIPE_FNAME_MAX - 6) {
+        c = name[i++];
+#if !defined(PLAT_FLAT32)
+        if (c == '-' && name[0] != '/') c = '/';
+#endif
+        dst[j++] = c;
+    }
     dst[j++] = '.'; dst[j++] = 'b'; dst[j++] = 'i'; dst[j++] = 'n';
     dst[j] = 0;
 }
@@ -268,7 +282,7 @@ unsigned char krun_pipe(const char *ln, const char *lp, unsigned char lc,
 {
     volatile unsigned char *pid = (volatile unsigned char *)KW_PIDTAB;
     volatile unsigned char *rt  = (volatile unsigned char *)KW_OUTROUTE;
-    char fn[24];
+    char fn[PIPE_FNAME_MAX];
     unsigned char wb, rb, ret = 0;
 
     /* reader 起動 + 4KB バッファブロック確保 */

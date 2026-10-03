@@ -112,7 +112,7 @@
  *   PIDTBL と同じブロック番号でここへ書く。ps はここを直に覗くだけ
  *   (メモリ保護が無いので可能)。block0(sh)/block1(DRIVER) 用のスロット
  *   は使わない(ps 側で block0 を "(sh)" と決め打ち、block1 は非走行)。
- *   x86-ia16/m68k-mega はこのテーブルを使わない(別方式の kexec_file)。
+ *   PLAT_FLAT32 のポートは同じ形の表を kwork に持つ(下の節)。x86-ia16 は持たない。
  * ------------------------------------------------------------------ */
 #define KW_CMDNAME      0x830B            /* cmdtbl_name[block][16] */
 #define KW_CMDNAME_LEN  16
@@ -186,14 +186,14 @@
  * blocked[n]=1 が残ると、次の占有者が sched_pick に永久に飛ばされる。
  * wakepend の残りは「proc_block が 1 回素通りする」だけで、呼び出し側は
  * 条件を見直すループなので無害 ── ROM 節約のためこちらは落とさない。
- * 起動時の初期化は z80 は crt0.s の PCB 初期化、m68k / x86 は kwork が BSS。 */
+ * 起動時の初期化は z80 は crt0.s の PCB 初期化、それ以外は kwork が BSS。 */
 #define PROC_CLEAR_BLOCKED(n) (((volatile unsigned char *)KW_BLOCKED)[n] = 0)
 
 /* 生モード(tty の ISIG 無効に相当)のスロット番号。0 = 通常(Ctrl+C は割り込み)。
- * con_setraw(m68k: src/io.c / z80: DRIVER の drv_conraw)が立て、con_break が見る。
+ * con_setraw(PLAT_FLAT32: src/io.c / z80: DRIVER の drv_conraw)が立て、con_break が見る。
  * 要求元が終わっていれば con_break は通常どおり扱い、sh が前景ジョブの終了後に
  * 0 へ戻す(Unix のシェルが前景ジョブの後で端末モードを戻すのと同じ)。
- * KW_CONRAW の番地は z80 / m68k それぞれの節で決める(x86 は持たない)。 */
+ * KW_CONRAW の番地は z80 / PLAT_FLAT32 それぞれの節で決める(x86 は持たない)。 */
 #define KCONRAW             (*(volatile unsigned char *)KW_CONRAW)
 
 /* ---- カーネルパイプ (#27: 4KB ブロックバッファ版。同時 1 本) --------------
@@ -204,7 +204,7 @@
  *   reader の getchar → pipe_is_reader → pipe_getc(空なら proc_block、
  *   writer 終了 or ovf で EOF)。crt0.s 起動時に header をゼロクリア。
  *   x86 は Step 14(pipe.c を stub 化して無害にビルド)。 */
-#if !defined(ARCH_X86_IA16) && !defined(ARCH_M68K_MEGA)
+#if !defined(ARCH_X86_IA16) && !defined(PLAT_FLAT32)
 #define KW_PIPE         0x8539            /* struct kpipe ヘッダ (11B, 0x8539-0x8543)。
                                           * 旧 128B buf[] 廃止で 0x8545-0x85C1 は空き。 */
 #define KW_CONRAW       0x8544            /* 生モードのスロット (1B)。crt0 のクリア範囲の末尾 */
@@ -395,19 +395,14 @@
 #define PROC_BLK_HI     8                 /* 同・最後の次(半開区間) */
 #define PROC_BLK_N      (PROC_BLK_HI - PROC_BLK_LO)   /* = 6。物理上限 */
 
-/* 割り込み禁止/許可(short critical section 用)。arch 差を 1 箇所に。 */
-#if defined(ARCH_X86_IA16)
+/* 割り込み禁止/許可(short critical section 用)と、待ちループから自分で譲る KYIELD。
+ *   CPU の命令そのものなので、gcc 系のポート(PLAT_FLAT32)は arch の include/plat.h が
+ *   持つ(ここにアーキごとの枝を足さない)。以下は plat.h を持たない z80 と x86-ia16 のぶん。 */
+#if defined(IRQ_OFF)
+   /* arch/<arch>/include/plat.h が定義済み */
+#elif defined(ARCH_X86_IA16)
 #  define IRQ_OFF()  __asm__ volatile ("cli" ::: "memory")
 #  define IRQ_ON()   __asm__ volatile ("sti" ::: "memory")
-#elif defined(ARCH_M68K_MEGA)
-   /* SR の割込みマスク(bit 8-10)だけ操作。他ビット(S/T)は触らない。 */
-#  define IRQ_OFF()  __asm__ volatile ("ori.w  #0x0700,%%sr" ::: "memory")
-#  define IRQ_ON()   __asm__ volatile ("andi.w #0xf8ff,%%sr" ::: "memory")
-   /* #94: 待ちループ(sh の前景待ち・入力待ち・init・getticks)から自分で譲る。
-    * TRAP #1 = crt0.s の trap1_handler(タイマ割込みと同じ save/pick/restore、
-    * tick は進めない)。以前は空で、実機のタイマ 1Hz だと sh が子を起動しても
-    * 次の tick まで自分のスロットで回り続け、外部コマンド 1 回に約 1.5 秒かかった。 */
-#  define KYIELD()   __asm__ volatile ("trap #1" ::: "memory")
 #elif defined(ARCH_Z80BOARD)
    /* #59: 2026-09-19 に PIC GP5(タイマ、Timer0 オーバーフローでトグル。
     * 実測 500us/500us の 1ms 周期)をダイオードで D1(FT245 ~RXF)と
@@ -473,24 +468,32 @@ extern unsigned char kwork[0x160];        /* 実体は src/kernel.c */
 #endif /* ARCH_X86_IA16 */
 
 /* ==================================================================
- * m68k-mega: x86-ia16 と同じ考え方(絶対番地ワークを実 RAM の配列に
- *   載せ替える)。cwd/カーネルパイプ/DRIVER 常駐/外部 sh は当面未対応
- *   (上の #if !ARCH_X86_IA16 && !ARCH_M68K_MEGA ブロックで KW_PIPE 等は
- *   丸ごと除外済み)。KW_SSTBL は不要(セグメントが無い)。
+ * PLAT_FLAT32: gcc の 32bit フラットなポート(m68k-mega / esp32-wroom-32e …)。
+ *   x86-ia16 と同じ考え方で、絶対番地ワークを実 RAM の配列 kwork[] に載せる。
+ *   どのアーキかは見ない ── arch の include/plat.h が名乗る次のものだけで決まる
+ *   (ポートを足しても、ここに節を足さなくてよい):
+ *     PLAT_FLAT32        この節を選ぶ
+ *     PLAT_NSLOT         スロット数(slot0 = カーネル + init 込み)
+ *     PLAT_SLOT_ADDR(n)  スロット n(1..)のメモリの先頭
  *
- *   ★x86 の数値オフセットをそのまま流用できない: m68k は int=32bit・
- *   ポインタ=4B(z80/x86 はどちらも 16bit)なので KW_TICKS(unsigned int)が
- *   2B→4B に太り、struct vnode(vfs.h)も data ポインタが 4B になって
- *   16B→20B に太る。さらに 68000 は word/long アクセスに偶数番地を要求する
- *   (奇数番地アクセスは Address Error 例外で即死)。x86 のオフセットを
- *   コピーしただけの版で実測: kernel_init の `TICKS = 0`(KW_TICKS=0x8527
- *   相当=偶数境界からの奇数オフセット)が address error → 起動直後に
- *   default_vector へ落ちてハングした。そのため全フィールドを m68k の
- *   実サイズで採り直し、境界は全部偶数に揃えてある。 */
-#if defined(ARCH_M68K_MEGA)
+ *   ★z80 / x86 の数値オフセットは流用できない: int=32bit・ポインタ=4B なので
+ *   KW_TICKS(unsigned int)が 2B→4B に太り、struct vnode(vfs.h)も data ポインタが
+ *   4B になって 16B→20B に太る。しかも 32bit アクセスには境界の制約がある
+ *   (68000 は奇数番地で Address Error、Xtensa は 4 バイト境界でないと例外)。
+ *   実際に x86 のオフセットを写しただけの版は、m68k で kernel_init の `TICKS = 0`
+ *   が address error になり、起動直後にハングした。
+ *
+ *   そこで番地は手で書かず、**前の項目の末尾から積み上げる**。32bit の項目の前では
+ *   KW_A4 で 4 バイト境界に揃える(68000 にもそのまま通る)。スロット数を変えても
+ *   採り直しは要らず、kwork の大きさ(KWORK_SIZE)もここから決まる。
+ *   以前は m68k-mega が 63 枠ぶんを手計算した表を持っていて、スロット数を変えると
+ *   表どうしが静かに重なる作りだった。
+ *   32bit の項目が 4 バイト境界に乗っていることは src/kernel.c がビルド時に確かめる。
+ * ================================================================== */
+#if defined(PLAT_FLAT32)
 
 extern unsigned char kwork[];             /* 実体は src/kernel.c(大きさは KWORK_SIZE) */
-#define KW_BASE        ((unsigned)(void *)kwork)
+#define KW_BASE        ((unsigned long)(void *)kwork)
 
 #undef  KW_PIDTAB
 #undef  KW_SPTBL
@@ -504,86 +507,78 @@ extern unsigned char kwork[];             /* 実体は src/kernel.c(大きさは
 #undef  KW_BLOCKED
 #undef  KW_WAKEPEND
 #undef  KW_VTREE_SIZE
-
-/* ★スロット数の唯一の定義場所(#61、2026-09-24)。
- *
- *   以前は三者がバラバラだった ── kmem.h のテーブルが 32 エントリ、
- *   src/kernel.c の M68K_NSLOT が 8、src/kexec.c の PROC_NSLOT が 31。
- *   スケジューラは 8 枠しか回らないので、**スロット 8 以降に作られた
- *   プロセスは生成されるだけで永久に走らない**という状態になっていた。
- *   走査範囲もテーブルの大きさも、必ずここから導くこと。
- *
- *   slot 0     = kernel/shell(起動時からの呼び出しスタックをそのまま使う。
- *                x86 の pid_tbl[0]=1 と同じ役回り)
- *   slot 1..30 = 外部コマンド。kexec.c の PROC_BASE(n) = 0x8000 + (n-1)*32KB
- *                なので、30 枠で 0x8000〜0xF8000。最上位の 16KB は
- *                **カーネル(slot 0)のスタック用に空けてある** ──
- *                link-kernel.ld の __stack_top = 0x100000 から下へ伸びるので、
- *                ここまでプロセスを置くと衝突する。
- *
- *   #61 の PIC 化前はスロットを増やすと全コマンドをその数だけ再リンクする
- *   必要があったが、いまは .bin が 1 本なので、増やす代償はこのテーブルと
- *   kwork の大きさだけ。 */
-#define M68K_NSLOT     31                 /* slot0 込みの総数(= 外部 30 + 1) */
-
-/* 以下のオフセットは M68K_NSLOT=63 で手計算したもの。境界は全部偶数
- * (m68k は奇数番地の word アクセスで Address Error になる)。テーブルは
- * 63 エントリぶん採ってあり 1 枠余裕がある(超えたら src/kernel.c の
- * kw_slot_fits でビルドが止まる)。
- * スロット数を変えたら全部採り直すこと。 */
-#define KW_PIDTAB     (KW_BASE + 0x000)   /* u8[63]  : 0x000..0x03E */
-#define KW_SPTBL      (KW_BASE + 0x040)   /* u32[63] : 退避 SP(252B) */
-#define KW_CURRENT    (KW_BASE + 0x13C)   /* u8 */
-#define KW_VTREE      (KW_BASE + 0x13E)   /* struct vnode[16], m68k では20B/個 */
-#define KW_VTREE_SIZE (KW_VTREE_N * 20)   /* 320B。sizeof(struct vnode) 実測に追随 */
-#define KW_NEXTFD     (KW_BASE + 0x27E)   /* u8 */
-#define KW_OUTROUTE   (KW_BASE + 0x280)   /* u8[63] */
-#define KW_EPOCH_SEC  (KW_BASE + 0x2C0)   /* u32 */
-#define KW_SUB_TICK   (KW_BASE + 0x2C4)   /* u8 */
-#define KW_TICKS      (KW_BASE + 0x2C6)   /* u32(m68k unsigned int)。偶数境界必須 */
-#define KW_BLOCKED    (KW_BASE + 0x2CA)   /* u8[63] */
-#define KW_WAKEPEND   (KW_BASE + 0x30A)   /* u8[63] */
-/* #78: ps 用のコマンド名/引数表。z80 の KW_CMDNAME/KW_CMDARGS と同じ形
- * (スロット番号 n で引く char[n][LEN])で、置き場所だけ kwork に移す。
- * 表の大きさは M68K_NSLOT から導く(手計算の 63 エントリ表とは違い、
- * スロット数を変えてもここは採り直し不要)。char 配列なので整列は不問。 */
 #undef  KW_CMDNAME
 #undef  KW_CMDARGS
-#define KW_CMDNAME    (KW_BASE + 0x34A)   /* char[M68K_NSLOT][KW_CMDNAME_LEN] */
-#define KW_CMDARGS    (KW_CMDNAME + M68K_NSLOT * KW_CMDNAME_LEN)
-#define KW_CMD_END    (0x34A + M68K_NSLOT * (KW_CMDNAME_LEN + KW_CMDARGS_LEN))
-/* #82: カーネルパイプ(src/pipe.c)を m68k でも使う。struct kpipe は m68k で
- * 16B(char 7 個 + 詰め物 + unsigned int 4B x2)。偶数境界に置き 32B 取る。 */
-#undef  KW_PIPE
-#define KW_PIPE       (KW_BASE + ((KW_CMD_END + 1) & ~1))
-/* sh の外部コマンド化(/bin/sh.bin)に伴い、z80 と同じくカーネルが cwd を持ち、
- * パスを受け取る入口が kpath() で cwd 起点に解決する(src/fatcmd.c)。
- * スクラッチはスロットごとに 2 枠(z80 の KW_PATHS と同じ形、枠数だけ M68K_NSLOT)。
- * ※ cwd はいずれプロセスの持ち物へ移す予定(TK 2026-09-25)。 */
-#define KW_CWD_OFF    (((KW_CMD_END + 1) & ~1) + 0x20)
-#define KW_CWD        (KW_BASE + KW_CWD_OFF)             /* char[KW_CWD_MAX] */
-#define KW_CWD_MAX    48
-#define KW_PATHS      (KW_CWD + KW_CWD_MAX)              /* char[M68K_NSLOT][2][48] */
-#define KW_PATH_MAX   48
-#define KW_PATH_SLOTS 2
-#define KW_PATH_STRIDE (KW_PATH_MAX * KW_PATH_SLOTS)
-#define KW_CONRAW     (KW_PATHS + M68K_NSLOT * KW_PATH_STRIDE)   /* u8。生モードのスロット */
-#define KW_M68K_USED  (KW_CWD_OFF + KW_CWD_MAX + M68K_NSLOT * KW_PATH_STRIDE + 2)
-/* 使用末端 KW_M68K_USED(31 枠で 0x1222)。kwork の大きさは KWORK_SIZE が
- * 唯一の定義場所で、溢れたら src/kernel.c の kw_used_fits でビルドが止まる。 */
-#define KWORK_SIZE    0x1230
 
-/* #82: プロセス枠の番号範囲と番地。z80 はブロック 2..7(4KB)、m68k はスロット
- * 1..M68K_NSLOT-1(32KB、src/kexec.c の PROC_BASE(n) = 0x8000 + (n-1)*0x8000
- * = n*0x8000)。src/pipe.c はこれだけを見てバッファ枠を取る。 */
+/* スロット数。slot0 = kernel/init(起動時からの呼び出しスタックをそのまま使う)、
+ * 1..KW_NSLOT-1 = 外部コマンド。スケジューラの走査範囲(src/kernel.c)も下の表の
+ * 大きさも、必ずここから導く(#61: 以前は三者がバラバラで、スロット 8 以降に
+ * 作られたプロセスが永久に走らなかった)。値は arch の include/plat.h。 */
+#define KW_NSLOT       PLAT_NSLOT
+
+#define KW_A4(x)       (((x) + 3UL) & ~3UL)
+#define KW_O_PIDTAB    0UL                                             /* u8[N]  */
+#define KW_O_SPTBL     KW_A4(KW_O_PIDTAB + KW_NSLOT)                   /* u32[N]: 退避 SP */
+#define KW_O_EPOCH     (KW_O_SPTBL + 4UL * KW_NSLOT)                   /* u32    */
+#define KW_O_TICKS     (KW_O_EPOCH + 4UL)                              /* u32(unsigned int) */
+#define KW_O_VTREE     (KW_O_TICKS + 4UL)                              /* struct vnode[16] */
+#define KW_VTREE_SIZE  (KW_VTREE_N * 20)                               /* 20B/個。src/vfs.c が sizeof を確かめる */
+/* #82: カーネルパイプ(src/pipe.c)。struct kpipe は 16B(char 7 個 + 詰め物 +
+ * unsigned int 4B x2)。32B 取ってある(超えたら pipe.c の kpipe_fits で止まる)。 */
+#define KW_O_PIPE      KW_A4(KW_O_VTREE + KW_VTREE_SIZE)               /* struct kpipe(32B 枠) */
+#define KW_O_CURRENT   (KW_O_PIPE + 0x20UL)                            /* u8     */
+#define KW_O_NEXTFD    (KW_O_CURRENT + 1UL)                            /* u8     */
+#define KW_O_SUBTICK   (KW_O_NEXTFD + 1UL)                             /* u8     */
+#define KW_O_CONRAW    (KW_O_SUBTICK + 1UL)                            /* u8。生モードのスロット */
+#define KW_O_OUTROUTE  (KW_O_CONRAW + 1UL)                             /* u8[N]  */
+#define KW_O_EXITCODE  (KW_O_OUTROUTE + KW_NSLOT)                      /* u8[N]: そのスロットで最後に終わったプロセスの終了コード(#111) */
+/* blocked / wakepend の表は持たない: 眠り / 起こすはプロセスの見出しの欄(src/phdr.h、#112) */
+/* #78: ps 用のコマンド名/引数表。z80 の KW_CMDNAME/KW_CMDARGS と同じ形
+ * (スロット番号 n で引く char[n][LEN])で、置き場所だけ kwork に移す。 */
+#define KW_O_CMDNAME   (KW_O_EXITCODE + KW_NSLOT)                      /* char[N][16] */
+#define KW_O_CMDARGS   (KW_O_CMDNAME + KW_NSLOT * KW_CMDNAME_LEN)      /* char[N][8]  */
+/* z80 と同じくカーネルが cwd を持ち、パスを受け取る入口が kpath() で cwd 起点に
+ * 解決する(src/fatcmd.c)。スクラッチはスロットごとに 2 枠(z80 の KW_PATHS と同じ形)。
+ * ※ cwd はいずれプロセスの持ち物へ移す予定(TK 2026-09-25)。 */
+#define KW_O_CWD       (KW_O_CMDARGS + KW_NSLOT * KW_CMDARGS_LEN)      /* char[48]    */
+#define KW_CWD_MAX     48
+#define KW_PATH_MAX    48
+#define KW_PATH_SLOTS  2
+#define KW_PATH_STRIDE (KW_PATH_MAX * KW_PATH_SLOTS)
+#define KW_O_PATHS     (KW_O_CWD + KW_CWD_MAX)                         /* char[N][2][48] */
+#define KW_O_END       (KW_O_PATHS + KW_NSLOT * KW_PATH_STRIDE)        /* 使用末端 */
+#define KWORK_SIZE     KW_A4(KW_O_END)
+
+#define KW_PIDTAB      (KW_BASE + KW_O_PIDTAB)
+#define KW_SPTBL       (KW_BASE + KW_O_SPTBL)
+#define KW_CURRENT     (KW_BASE + KW_O_CURRENT)
+#define KW_VTREE       (KW_BASE + KW_O_VTREE)
+#define KW_NEXTFD      (KW_BASE + KW_O_NEXTFD)
+#define KW_OUTROUTE    (KW_BASE + KW_O_OUTROUTE)
+#define KW_EPOCH_SEC   (KW_BASE + KW_O_EPOCH)
+#define KW_SUB_TICK    (KW_BASE + KW_O_SUBTICK)
+#define KW_TICKS       (KW_BASE + KW_O_TICKS)
+#define KW_CMDNAME     (KW_BASE + KW_O_CMDNAME)
+#define KW_CMDARGS     (KW_BASE + KW_O_CMDARGS)
+#define KW_EXITCODE    (KW_BASE + KW_O_EXITCODE)
+#define KW_PIPE        (KW_BASE + KW_O_PIPE)
+#define KW_CONRAW      (KW_BASE + KW_O_CONRAW)
+#define KW_CWD         (KW_BASE + KW_O_CWD)
+#define KW_PATHS       (KW_BASE + KW_O_PATHS)
+
+/* #82: プロセス枠の番号範囲と番地。z80 はブロック 2..7(4KB)、こちらはスロット
+ * 1..KW_NSLOT-1。src/pipe.c(バッファ枠を取る)と src/builtin.c(ps / kill)が見る。 */
 #undef  PROC_BLOCK_MIN
 #undef  PROC_BLOCK_MAX
 #undef  BLOCK_ADDR
 #define PROC_BLOCK_MIN  1
-#define PROC_BLOCK_MAX  (M68K_NSLOT - 1)
-#define BLOCK_ADDR(n)   ((unsigned long)(n) * 0x8000UL)
+#define PROC_BLOCK_MAX  (KW_NSLOT - 1)
+#define BLOCK_ADDR(n)   PLAT_SLOT_ADDR(n)
+/* 眠りの欄は見出し(src/phdr.h)にあり、像をロードした時点で 0(走れる)になっている */
+#undef  PROC_CLEAR_BLOCKED
+#define PROC_CLEAR_BLOCKED(n) ((void)(n))
 
-#endif /* ARCH_M68K_MEGA */
+#endif /* PLAT_FLAT32 */
 
 #endif
 

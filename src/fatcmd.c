@@ -16,7 +16,7 @@ static FATFS fs;                 /* the mounted volume (static: ~560B in TINY) *
 /* kdir: backend 透過のディレクトリ反復状態(外部 ls 用、drv_tbl[21..23])。
  *   同時 1 個。定義は下の kdir_* 節も参照。全アーキ共通(#76)。
  *   置き場所だけアーキで違う: z80 は SDCC statics が FatFs win[512] と重なる
- *   回避で絶対番地 KW_LSDIR、x86-ia16 / m68k-mega は普通の static。 */
+ *   回避で絶対番地 KW_LSDIR(src/kmem.h が z80 にだけ定義する)、それ以外は普通の static。 */
 struct kdir {
     unsigned char inuse;
     unsigned char backend;      /* 0=FAT, 1=DEVFS */
@@ -24,7 +24,7 @@ struct kdir {
     unsigned char devnext;      /* DEVFS: 次に見る vtree slot / FAT: ルートなら 1(末尾に dev を足す) */
     DIR fdir;                   /* FAT: FatFs DIR(~40B) */
 };
-#if !defined(ARCH_X86_IA16) && !defined(ARCH_M68K_MEGA)
+#if defined(KW_LSDIR)
 #define KD ((struct kdir *)KW_LSDIR)
 #else
 static struct kdir kd_state;
@@ -265,7 +265,7 @@ int kdir_read(char *name) __sdcccall(0)          /* 0=終端 / 1=ファイル / 
 
     if (KD->backend == 0) {
         if (f_readdir(&KD->fdir, &kdir_fno) == FR_OK && kdir_fno.fname[0] != 0) {
-            for (i = 0; kdir_fno.fname[i] && i < 12; i++)
+            for (i = 0; kdir_fno.fname[i] && i < KNAME_MAX - 1; i++)
                 name[i] = kdir_fno.fname[i];
             name[i] = 0;
             return (kdir_fno.fattrib & AM_DIR) ? 2 : 1;
@@ -366,6 +366,14 @@ int redir_sink(int c)              /* io.c から直接呼ばれる */
 int redir_begin(const char *fname, unsigned char append)   /* 0=ok, -1=fail */
 {
     FRESULT r;
+#if defined(PLAT_FLAT32)
+    /* 出力の向け先は 1 本だけ(redir_fp)。向けている最中のもう 1 本(tzsh の中の tzsh が > を使う等)は
+     * 開いている方を壊す前に断る(#111)。z80 は ROM の余裕が無いので入れていない(sh は入れ子にしない)。 */
+    if (redir_active) {
+        kprintf("redir: nested redirection is not supported\n");
+        return -1;
+    }
+#endif
     while (*fname == ' ') fname++;
     fname = KPATH1(fname);          /* cwd 起点で解決(sh は絶対化しない) */
     /* /dev/null は sh 側の discard 経路で捌かれここには来ない。

@@ -84,7 +84,11 @@
 / Locale and Namespace Configurations
 /---------------------------------------------------------------------------*/
 
+#if defined(PLAT_FLAT32)
+#define FF_CODE_PAGE	437	/* gcc 系(#114): 短名は ASCII のみ。表は src/ffunicode_min.c */
+#else
 #define FF_CODE_PAGE	932
+#endif
 /* This option specifies the OEM code page to be used on the target system.
 /  Incorrect code page setting can cause a file open failure.
 /
@@ -113,8 +117,16 @@
 */
 
 
+#if defined(PLAT_FLAT32)
+#define FF_USE_LFN	2	/* gcc 系(#114): 長いファイル名。作業域はスタック(並行する syscall でも共有しない) */
+#else
 #define FF_USE_LFN	0
+#endif
+#if defined(PLAT_FLAT32)
+#define FF_MAX_LFN		64
+#else
 #define FF_MAX_LFN		255
+#endif
 /* The FF_USE_LFN switches the support for LFN (long file name).
 /
 /   0: Disable LFN. FF_MAX_LFN has no effect.
@@ -133,7 +145,11 @@
 /  ff_memfree() exemplified in ffsystem.c, need to be added to the project. */
 
 
+#if defined(PLAT_FLAT32)
+#define FF_LFN_UNICODE	2	/* gcc 系(#114): 名前は UTF-8 で受け渡す */
+#else
 #define FF_LFN_UNICODE	0
+#endif
 /* This option switches the character encoding on the API when LFN is enabled.
 /
 /   0: ANSI/OEM in current CP (TCHAR = char)
@@ -145,7 +161,11 @@
 /  When LFN is not enabled, this option has no effect. */
 
 
+#if defined(PLAT_FLAT32)
+#define FF_LFN_BUF		64	/* src/fatcmd.h の KNAME_MAX = これ + 1 */
+#else
 #define FF_LFN_BUF		255
+#endif
 #define FF_SFN_BUF		12
 /* This set of options defines size of file name members in the FILINFO structure
 /  which is used to read out directory items. These values should be suffcient for

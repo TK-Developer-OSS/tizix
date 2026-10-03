@@ -381,15 +381,18 @@ print(f"[{'OK ' if ok_diff else 'FAIL'}] 差分描画: 移動 {move_bytes}B / �
 #   報告することを見る。z80board では sleep が即座に終わってこれが通って
 #   いた(KYIELD が tick を進めていた。#71)。
 #   最後に置いてあるのは、失敗しても後続テストを巻き込まないため。
-run("echo x > VI4.TXT")
-run("sleep 6 &")
-got = run("vi VI4.TXT", 8.0)
-ok_nofree = "no free block" in got
-if not ok_nofree:
-    fails += 1
-print(f"[{'OK ' if ok_nofree else 'FAIL'}] ブロック不足は no free block で断る -> {got!r}")
-time.sleep(7)                       # 背景 sleep の終了を待つ
-run("")
+#   z80 の 4KB ブロック 6 個という枠の話なので、スロット方式のアーキ(m68k-mega /
+#   esp32-wroom-32e: vi は 1 スロットで、空きも十分ある)では検査しない。
+if tzpaths.ARCH in ("z80pack", "z80board"):
+    run("echo x > VI4.TXT")
+    run("sleep 6 &")
+    got = run("vi VI4.TXT", 8.0)
+    ok_nofree = "no free block" in got
+    if not ok_nofree:
+        fails += 1
+    print(f"[{'OK ' if ok_nofree else 'FAIL'}] ブロック不足は no free block で断る -> {got!r}")
+    time.sleep(7)                       # 背景 sleep の終了を待つ
+    run("")
 
 # ---- 後始末 ----
 for f in ("VI.TXT", "VI2.TXT", "VI3.TXT", "VI4.TXT", "VI5.TXT", "VI6.TXT", "VI7.TXT",

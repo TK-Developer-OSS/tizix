@@ -37,11 +37,9 @@ static const struct dev_ops null_ops = {
     null_open, null_read, null_write, null_close, null_ioctl
 };
 
-#if defined(ARCH_Z80PACK) || defined(ARCH_Z80BOARD) || defined(ARCH_M68K_MEGA)
-/* #32/z80board キャッチアップ: どちらも (B) へ移行。dev_ops 版 fda は持たない。
- * m68k-mega はまだ (A)(B) どちらの /dev/fda も実装していないので、
- * ひとまず z80 と同じ「null だけの表」に合流させる(fda_ops 未定義でも
- * リンクできるようにするため)。 */
+#if !defined(ARCH_X86_IA16)
+/* x86-ia16 以外は (B) を使う。dev_ops 版の fda は持たず、(A) の表は null だけ
+ * (#32 で z80pack / z80board が (B) へ移行。m68k-mega 以降のポートも同じ)。 */
 static const struct dev dev_tbl[] = {
     { "null", &null_ops },
     { 0, 0 }
@@ -65,8 +63,8 @@ const struct dev *dev_lookup(const char *name)
     return 0;
 }
 
-/* ---- (B) 生ブロックデバイス直接呼び (#32 z80pack / z80board キャッチアップ) ---- */
-#if defined(ARCH_Z80PACK) || defined(ARCH_Z80BOARD) || defined(ARCH_M68K_MEGA)
+/* ---- (B) 生ブロックデバイス直接呼び (#32。x86-ia16 以外の全アーキ) ---- */
+#if !defined(ARCH_X86_IA16)
 
 /* arch 提供: drive を明示して 512B セクタ 1 本を転送。
  *   z80pack: cpmsim FDC の drive(0=A/1=B)。
@@ -188,4 +186,4 @@ long kdev_tell(unsigned char fd)
     return (long)(u << 9);
 }
 
-#endif /* ARCH_Z80PACK || ARCH_Z80BOARD || ARCH_M68K_MEGA */
+#endif /* !ARCH_X86_IA16 */

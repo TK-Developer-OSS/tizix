@@ -1,21 +1,21 @@
 #include "io.h"
 #include "kernel.h"
 #include "kmem.h"
+#if defined(PLAT_FLAT32)
+#include "phdr.h"
+#endif
 
 #if defined(ARCH_X86_IA16)
 /* 絶対番地ワークの実体(kmem.h が KW_* をこの配列オフセットに再定義)。 */
 unsigned char kwork[0x160];
-#elif defined(ARCH_M68K_MEGA)
-/* m68k は int=32bit・ポインタ=4B で z80/x86(いずれも 16bit)より各フィールドが
- * 太る(struct vnode も 16B→20B)ため、専用サイズで確保する(kmem.h 参照)。 */
-unsigned char kwork[KWORK_SIZE];
-/* #78: ps 用の名前表を足したので、使用末端が KWORK_SIZE を越えたら止める。 */
-typedef char kw_used_fits[(KW_M68K_USED <= KWORK_SIZE) ? 1 : -1];
-/* #61: kmem.h の KW_* オフセットは 63 エントリで手計算してある。M68K_NSLOT を
- * それ以上へ増やすとテーブル同士が静かに重なるので、ここでビルドを止める
- * (配列長が負になりコンパイルエラー)。増やす時は kmem.h のオフセットを
- * 採り直してから、この 63 も一緒に上げること。 */
-typedef char kw_slot_table_fits[(M68K_NSLOT <= 63) ? 1 : -1];
+#elif defined(PLAT_FLAT32)
+/* 配置も大きさも kmem.h の PLAT_FLAT32 節が積み上げで決める(スロット数は arch の plat.h)。
+ * 配列そのものを 4 バイト境界に置き、その中の 32bit の項目が 4 バイト境界に
+ * 乗っていることをここで確かめる ── 68000 は奇数番地、Xtensa は 4 の倍数でない番地の
+ * 32bit アクセスで例外になる。エミュレータ(rocket68 / QEMU)はどちらも素通しするので、
+ * 実機で初めて落ちる種類の間違いをビルドで止める(配列長が負になりコンパイルエラー)。 */
+unsigned char kwork[KWORK_SIZE] __attribute__((aligned(4)));
+typedef char kw_u32_aligned[((KW_O_SPTBL | KW_O_EPOCH | KW_O_TICKS | KW_O_VTREE | KW_O_PIPE) & 3UL) == 0 ? 1 : -1];
 #elif defined(ARCH_Z80PACK)
 __sfr __at 27 TIMER;   /* cpmsim 仮想デバイス。out 1 で 100Hz tick が回り出す */
 #endif
@@ -53,11 +53,11 @@ void kernel_init(void)
     /* PIT 100Hz / INT 08h ベクタ / PIC アンマスクは crt0.s で設定済み。
      * ここで割り込みを解禁する(Z80 の ei 相当)。 */
     IRQ_ON();
-#elif defined(ARCH_M68K_MEGA)
-    /* レベル6ベクタ(crt0.s irq6_handler)は周期 tick を受ける。周期は
-     * arch/m68k-mega/Makefile の TICK_HZ(既定 100、m68ksim も同じ値。実機の
-     * Mega Timer5 が 1Hz なら TICK_HZ=1 でビルド)。#83。
-     * ここでは SR の割込みマスクを解くだけでよい。 */
+#elif defined(PLAT_FLAT32)
+    /* タイマの設定は arch 側が済ませている(周期は arch の Makefile の TICK_HZ。#83)。
+     *   m68k-mega: レベル6ベクタ(crt0.s irq6_handler)。実機は Mega の Timer5、m68ksim も同じ値
+     *   esp32-wroom-32e: kmain.c が CCOMPARE0 に仕掛ける
+     * ここでは割込みのマスクを解くだけでよい。 */
     IRQ_ON();
 #else
     __asm
@@ -89,9 +89,58 @@ void kernel_init(void)
  *   di/ei で囲む(他プロセスの time slice 内で走る proc_wake との排他)。
  *   パイプ / SD ドライバ段の本物の block/wake 土台。
  * ================================================================== */
+#define KCUR      (*(volatile unsigned char *)KW_CURRENT)
+
+#if defined(PLAT_FLAT32)
+/* ---- PLAT_FLAT32: 眠り / 起こすはプロセスの見出し(src/phdr.h、データ枠の先頭 32B)の欄で。
+ * task.md #112。z80 / x86 の KW_BLOCKED / KW_WAKEPEND 表の代わり。期限(起きる時刻)も持てる:
+ * 期限が来たらスケジューラ(slot_runnable)が欄を落として走らせる。 */
+unsigned char kphdr0[PH_SIZE] __attribute__((aligned(4)));   /* slot0 の見出し */
+
+/* wakeat = 起きる時刻(tick)。0 = 期限なし(proc_wake まで眠る)。
+ * 戻り: 1 = 起こされた(または先に起こされていた)/ 0 = 期限で起きた。 */
+int proc_block_until(unsigned long wakeat)
+{
+    unsigned char me = KCUR;
+
+    IRQ_OFF();
+    if (PH_PEND_OF(me)) {              /* 先に wake が来ていた → 消費して即戻る */
+        PH_PEND_OF(me) = 0;
+        IRQ_ON();
+        return 1;
+    }
+    PH_WAKEAT_OF(me) = wakeat;
+    PH_STATE_OF(me)  = PH_SLEEP;
+    IRQ_ON();
+
+    while (PH_STATE_OF(me) == PH_SLEEP)
+        KYIELD();                      /* 眠っている間はスケジューラが飛ばす(下の proc_block の注釈) */
+    /* 期限で起きたときは slot_runnable が PH_WAKEAT を 0 にしてから落とす */
+    return PH_WAKEAT_OF(me) == 0 && wakeat != 0 ? 0 : 1;
+}
+
+void proc_block(void)
+{
+    /* ★#47: m68ksim(rocket68)の STOP は数秒戻らないので使わない。#94: KYIELD で譲る。 */
+    (void)proc_block_until(0);
+}
+
+void proc_wake(unsigned char block)
+{
+    if (block > PROC_BLOCK_MAX)        /* パイプの「まだ居ない」印(0xFF)など */
+        return;
+    IRQ_OFF();
+    if (PH_STATE_OF(block) == PH_SLEEP) {
+        PH_WAKEAT_OF(block) = 1;       /* 「起こされた」印(0 は期限切れの印) */
+        PH_STATE_OF(block)  = PH_RUN;
+    } else
+        PH_PEND_OF(block) = 1;         /* まだ眠っていない → 取りこぼし防止 */
+    IRQ_ON();
+}
+
+#else
 #define KBLOCKED  ((volatile unsigned char *)KW_BLOCKED)
 #define KWAKEPEND ((volatile unsigned char *)KW_WAKEPEND)
-#define KCUR      (*(volatile unsigned char *)KW_CURRENT)
 
 void proc_block(void) __sdcccall(0)
 {
@@ -109,7 +158,7 @@ void proc_block(void) __sdcccall(0)
     while (KBLOCKED[me]) {            /* park。ISR が退避 → sched_pick が飛ばす */
 #if defined(ARCH_X86_IA16)
         __asm__ volatile ("sti; hlt");
-#elif defined(ARCH_M68K_MEGA)
+#elif defined(PLAT_FLAT32)
         /* ★#47: m68ksim(rocket68)の STOP 実装が呼出1回あたり数秒単位で
          * ホストへ制御を返さない(内部で割込み到着を長々とポーリングし、
          * CYCLES_PER_SLICE を守らない)ことが判明した(kmain.c の同種の
@@ -140,75 +189,97 @@ void proc_wake(unsigned char block) __sdcccall(0)
         KWAKEPEND[block] = 1;        /* まだ park してない → 取りこぼし防止 */
     IRQ_ON();
 }
+#endif /* !PLAT_FLAT32 */
 
-#if defined(ARCH_M68K_MEGA)
+#if defined(PLAT_FLAT32)
 /* ==================================================================
- * m68k-mega スケジューラ(2 スロット: 0=kernel/shell, 1=外部コマンド)。
- *   crt0.s の irq6_handler(タイマ)/trap0_handler(syscall)から呼ばれる。
- *   レジスタ退避(movem)と SP の切替は asm 側、「誰に切り替えるか」だけ
- *   ここで計算する(x86 の _isr08 のロジックを C に写したもの)。
+ * スケジューラの C 側(PLAT_FLAT32 のポート共通。slot0 = kernel/init、1.. = 外部コマンド)。
+ *   arch の例外入口(m68k-mega: crt0.s の irq6_handler / trap0_handler、
+ *   esp32-wroom-32e: crt0.S の exc_entry)から呼ばれる。レジスタの退避と SP の
+ *   切替は asm 側、「誰に切り替えるか」だけここで計算する(x86 の _isr08 の
+ *   ロジックを C に写したもの)。
  * ================================================================== */
-/* M68K_NSLOT は src/kmem.h が唯一の定義場所(#61)。ここで再定義しない ──
- * 以前ここが 8 のままで、スロット 8 以降が永久にスケジュールされなかった。 */
-#define M68K_PIDTAB ((volatile unsigned char *)KW_PIDTAB)
-#define M68K_SPTBL  ((volatile unsigned long  *)KW_SPTBL)
-#define M68K_CUR    (*(volatile unsigned char *)KW_CURRENT)
+/* スロット数 KW_NSLOT は arch の include/plat.h(PLAT_NSLOT)が唯一の定義場所(#61)。
+ * ここで再定義しない ── 以前ここが 8 のままで、スロット 8 以降が永久に
+ * スケジュールされなかった。 */
+#define KS_PIDTAB ((volatile unsigned char *)KW_PIDTAB)
+#define KS_SPTBL  ((volatile unsigned long  *)KW_SPTBL)
+#define KS_CUR    (*(volatile unsigned char *)KW_CURRENT)
 
 /* 走らせてよいスロットか。z80 の crt0.s sched_pick と同じ規則(#82):
  *   pid==0(free)と PID_PIPEBUF(カーネルパイプのバッファ枠。プロセスではない
  *   ので「切り替える」と暴走する)は飛ばす。slot0(kernel/shell)以外は
- *   proc_block 中(KW_BLOCKED)も飛ばす。 */
-static unsigned char m68k_runnable(unsigned char c)
+ *   眠っている(見出しの PH_STATE、src/phdr.h)スロットも飛ばす。ただし起きる時刻が
+ *   来ていれば欄を落として走らせる(PH_WAKEAT を 0 にして「期限で起きた」の印に)。
+ *   slot0 は眠っていても飛ばさない(期限の処理だけする)。 */
+static unsigned char slot_runnable(unsigned char c)
 {
-    unsigned char p = M68K_PIDTAB[c];
+    unsigned char p = KS_PIDTAB[c];
 
-    if (p == 0 || p == PID_PIPEBUF)
+    if (p == 0 || p == PID_PIPEBUF || p == PID_CONT)   /* PID_CONT = 複数スロットのプロセスの続き(#113) */
         return 0;
-    if (c != 0 && KBLOCKED[c])
-        return 0;
+    if (PH_STATE_OF(c) == PH_SLEEP) {
+        unsigned long w = PH_WAKEAT_OF(c);
+        if (w != 0 && (long)((unsigned long)TICKS - w) >= 0) {
+            PH_WAKEAT_OF(c) = 0;
+            PH_STATE_OF(c)  = PH_RUN;
+        } else if (c != 0)
+            return 0;
+    }
     return 1;
 }
 
 /* タイマ割込み: 現在のスロットの SP を保存し、次に走らせるスロットの
- * SP を返す。走れないスロット(m68k_runnable)は飛ばす。1 個も無ければ
+ * SP を返す。走れないスロット(slot_runnable)は飛ばす。1 個も無ければ
  * 現在のスロットを維持する(slot0 は常時 runnable なので実際には起きない)。 */
 unsigned long sched_tick_sp(unsigned long cur_sp)
 {
-    unsigned char c = M68K_CUR;
+    unsigned char c = KS_CUR;
     unsigned char n;
 
-    M68K_SPTBL[c] = cur_sp;
-    for (n = 0; n < M68K_NSLOT; n++) {
+    KS_SPTBL[c] = cur_sp;
+    for (n = 0; n < KW_NSLOT; n++) {
         c++;
-        if (c >= M68K_NSLOT) c = 0;
-        if (m68k_runnable(c)) {
-            M68K_CUR = c;
-            return M68K_SPTBL[c];
+        if (c >= KW_NSLOT) c = 0;
+        if (slot_runnable(c)) {
+            KS_CUR = c;
+            return KS_SPTBL[c];
         }
     }
     return cur_sp;   /* 走行可能スロットが無い(異常系)。今のまま続行 */
 }
 
-/* exit syscall: 現在のスロットを解放してから次を探す(現コンテキストは
- * 破棄するので保存しない)。 */
-unsigned long sched_exit_sp(void)
+/* プロセスのスロットを解放する(先頭 n と、続きの PID_CONT。#113)。exit / kill の共通の出口。 */
+void proc_release(unsigned char n)
 {
-    unsigned char c = M68K_CUR;
+    if (n == 0 || n >= KW_NSLOT)
+        return;
+    KS_PIDTAB[n] = 0;
+    while (++n < KW_NSLOT && KS_PIDTAB[n] == PID_CONT)
+        KS_PIDTAB[n] = 0;
+}
+
+/* exit syscall: 終了コード(main の戻り値。arch の crt0cmd が exit に載せてくる)を控え、
+ * 現在のスロットを解放してから次を探す(現コンテキストは破棄するので保存しない)。 */
+unsigned long sched_exit_sp(unsigned long code)
+{
+    unsigned char c = KS_CUR;
     unsigned char n;
 
-    M68K_PIDTAB[c] = 0;
-    for (n = 0; n < M68K_NSLOT; n++) {
+    ((volatile unsigned char *)KW_EXITCODE)[c] = (unsigned char)code;   /* #111 */
+    proc_release(c);
+    for (n = 0; n < KW_NSLOT; n++) {
         c++;
-        if (c >= M68K_NSLOT) c = 0;
-        if (m68k_runnable(c)) {
-            M68K_CUR = c;
-            return M68K_SPTBL[c];
+        if (c >= KW_NSLOT) c = 0;
+        if (slot_runnable(c)) {
+            KS_CUR = c;
+            return KS_SPTBL[c];
         }
     }
     /* slot0(kernel/shell)は pid_tbl[0]!=0 で常時 runnable のはずなので
      * ここに来るのは PCB 初期化忘れ等の異常系。slot0 へ強制的に戻す。 */
-    M68K_CUR = 0;
-    return M68K_SPTBL[0];
+    KS_CUR = 0;
+    return KS_SPTBL[0];
 }
 #endif
 

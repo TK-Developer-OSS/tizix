@@ -30,7 +30,10 @@ NSEC     = 254          # kernel image sectors。boot.s の NSEC と一致必須
 #   src/dev.c がそれを直接 extern する。旧 dev_fda.c は dev_ops(関数ポインタ表)
 #   前提で、しかも pdrv を無視して常に drive B を読んでいた ── 名前は fda なのに
 #   実体は B、かつ誰からも呼ばれていなかった。
-KOBJ_ARCH =
+#   console.c = コンソールの物理層(層1。約束は src/console.h)。2026-09-30 に
+#   ここへ足した ── 旧 arch.mk の時代も含めて一度もリンクされておらず、同じ中身が
+#   src/io.c に直書きされていた(カーネル +45 バイト)。
+KOBJ_ARCH = console.rel
 
 DISK   = disks/drivea.dsk
 FATDSK = disks/driveb.dsk

@@ -1,7 +1,7 @@
 /* arch/m68k-mega/user/crt0cmd.s : m68k 外部コマンドの C ランタイム入口
  *
- *   kexec_argv(src/kexec.c)が PROC_BASE(0x8000)固定へロードし、偽コンテキ
- *   ストで D0=argc / A0=&argv[0] / PC=PROC_BASE(=ここ)へ「復帰」してくる
+ *   kexec_argv(src/kexec.c + loader.c)が空きスロットへロードし、偽コンテキ
+ *   ストで D0=argc / A0=&argv[0] / PC=像の先頭(=ここ)へ「復帰」してくる
  *   (crt0.s の trap0_handler/irq6_handler と同じ movem 復元経路)。
 * 
 *   #61: **PIC 化した**。-mpcrel でコンパイルした C と揃えるため、この
@@ -33,7 +33,8 @@ _start:
     bsr.w   main
     addq.l  #8, %sp
 
-    /* exit: D0=0 (func) で TRAP #0 */
+    /* exit: D0=0 (func) で TRAP #0。D1 = 終了コード(main の戻り値。#111) */
+    move.l  %d0, %d1
     moveq   #0, %d0
     trap    #0
 4:

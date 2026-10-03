@@ -1,4 +1,4 @@
-#include "con.h"
+#include "console.h"
 
 /* ------------------------------------------------------------------
  * 層1 実体: cpmsim console
@@ -7,6 +7,10 @@
  * 実機(Z84C000 + FT245RL)でもポート番号を同じ 0/1 に合わせてあるので、
  * 当面 #ifdef は撒かない。実機分岐が要る段(初期化やステータス極性が
  * 違うと判明した段)でこのファイルだけを差し替える。
+ *
+ * 2026-09-30: リンクに入れた(Makefile の KOBJ_ARCH)。それまでは初回
+ * コミットから一度も繋がれておらず、同じ中身が src/io.c に直書きされていた。
+ * src/io.c の kputchar / kgetchar / con_break がここを呼ぶ。
  * ------------------------------------------------------------------ */
 #define CON_STAT 0x00
 #define CON_DATA 0x01
@@ -17,6 +21,11 @@ __sfr __at CON_DATA CONDATA;
 void con_putc(char c)
 {
     CONDATA = c;
+}
+
+int con_rx_ready(void)
+{
+    return CONSTAT != 0;
 }
 
 /* 返り値は unsigned char。int へ符号拡張されないことが必須:

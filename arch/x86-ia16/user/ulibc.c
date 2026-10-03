@@ -81,8 +81,8 @@ int closedir(int dh)
 	return 0;
 }
 
-/* string.h(arch/x86-ia16/include/string.h)は宣言だけで実体はカーネル側
- * libc.c にあるが、あちらはユーザーコマンドにはリンクされない。grep 等
+/* string.h(src/libc/string.h)は宣言だけで実体はカーネル側(src/libc/libc.c)
+ * にあるが、あちらはユーザーコマンドにはリンクされない。grep 等
  * ユーザーコマンドが strstr を使うためここに実体を置く。 */
 char *strstr(const char *hay, const char *needle)
 {

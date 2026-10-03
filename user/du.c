@@ -11,12 +11,15 @@
  *   超えうるので 32bit のまま prnuml で出す。
  */
 #include "stdio.h"
+#ifndef TZ_NAME_MAX
+#define TZ_NAME_MAX 16   /* z80: 8.3(gcc 側は stdio.h が長いファイル名の 65 にする。#114) */
+#endif
 #include "string.h"
 
 int main(int argc, char **argv)
 {
     char *path;
-    char name[16];
+    char name[TZ_NAME_MAX];
     FILE *fp;
     int t;
     unsigned long total = 0;

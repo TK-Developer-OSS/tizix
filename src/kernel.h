@@ -26,5 +26,12 @@ void time_set(unsigned long sec) __sdcccall(0);
  * コマンドからも叩くため __sdcccall(0)。パイプ/SD 段の block/wake 土台。 */
 void proc_block(void) __sdcccall(0);
 void proc_wake(unsigned char block) __sdcccall(0);
+#if defined(PLAT_FLAT32)
+/* 期限つきの眠り(#112)。wakeat = 起きる時刻(tick、0 = 期限なし)。
+ * 戻り 1 = 起こされた / 0 = 期限で起きた。欄はプロセスの見出し(src/phdr.h)。 */
+int proc_block_until(unsigned long wakeat);
+/* スロット n のプロセスを解放(続きの PID_CONT も。#113)。exit / kill が使う */
+void proc_release(unsigned char n);
+#endif
 
 #endif

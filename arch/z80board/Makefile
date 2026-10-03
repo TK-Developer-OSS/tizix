@@ -42,7 +42,11 @@ endif
 #   boot.s はここには含めない ── あれは SD/コンソール単体ブリングアップ用の
 #   独立モニタ(自前の reset ベクタ 0x0000 を持つ)で、crt0.s と衝突する。
 #   カーネルには要らない。実機の SPI 配線確認だけに単独で焼く用途。
-KOBJ_ARCH = spi.rel sdcard.rel
+#   console.c = コンソールの物理層(層1。約束は src/console.h)。2026-09-30 に
+#   ここへ足した ── それまで一度もリンクされておらず、同じ役目のコードが
+#   src/io.c に直書きされていた(ROM +33 バイト。誰も呼ばなくなっていた
+#   readline を src/sh.c へ移して空けた 220 バイトから出した)。
+KOBJ_ARCH = spi.rel sdcard.rel console.rel
 
 # _HEADER(リセット+IM1+ソフトベクタ、crt0.s が .org で直書き)は 0x0000-0x006C。
 # 0x006D 以降が空き(memory: 低位ベクタはハードウェア用)。_CODE はそこから

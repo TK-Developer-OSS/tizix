@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # test_args.py - 外部コマンドへの引数の渡り方がアーキ間で揃っているか(#48 / #81)
 #
-#   使い方: python3 python/test_args.py [z80pack|z80board|m68k-mega]
+#   使い方: python3 python/test_args.py [z80pack|z80board|m68k-mega|esp32-wroom-32e]
+#           (省略時は TIZIX_ARCH、既定 z80pack。起動コマンドは tzpaths.py が持つ)
 #   検査:
 #     ・echo a b c / echo "x  y" z(引用符の中の空白を保つ)
 #     ・wc -l FILE / wc -lw FILE / パイプ後段の wc -l(-l をファイル名と見ない)
@@ -15,16 +16,13 @@ import time
 import select
 import subprocess
 
-TIZIX = os.environ.get("TIZIX_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ARCH = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("TIZIX_ARCH", "z80pack")
-SIMS = {
-    "z80pack":   ["./cpmsim", "-d", "disks"],
-    "z80board":  ["./z80boardsim", "-x", "../../build/arch/z80board/obj/kernel.ihx"],
-    "m68k-mega": ["./m68ksim", "../../build/arch/m68k-mega/obj/kernel.bin", "../../build/arch/m68k-mega/obj/disk.img"],
-}
+os.environ["TIZIX_ARCH"] = ARCH           # tzpaths は import 時にこれを読む
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tzpaths
 
 master, slave = pty.openpty()
-proc = subprocess.Popen(SIMS[ARCH], cwd=os.path.join(TIZIX, "arch", ARCH),
+proc = subprocess.Popen(tzpaths.CPMSIM_CMD, cwd=tzpaths.CPMSIM_CWD,
                         stdin=slave, stdout=slave, stderr=slave, close_fds=True)
 os.close(slave)
 

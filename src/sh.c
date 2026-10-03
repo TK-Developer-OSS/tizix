@@ -35,6 +35,90 @@ static char redirbuf[CWD_MAX];       /* > / < のファイル名の絶対化用 
 static char pipebuf[CWD_MAX];        /* パイプ左辺の引数絶対化(右辺は argbuf 共用) */
 static char prompt[CWD_MAX + 8];     /* "[" + cwd + "]# " + NUL */
 
+/* ================================================================== */
+/* 行編集(readline)                                                  */
+/*   以前は src/io.c にあった。呼ぶのはこの sh だけなので、ここへ移した */
+/*   ── sh をカーネルに内蔵しないアーキ(z80 / m68k-mega / esp32 は     */
+/*   user/sh.c を /bin/sh.bin として起動)の像に載せないため。          */
+/* ================================================================== */
+#if defined(ARCH_X86_IA16)
+extern unsigned int getticks(void);
+extern int con_rx_ready(void);      /* arch/<arch>/console.c(約束は console.h) */
+
+/* ESC の次バイトを短時間(1 tick 以内)だけ待つ。矢印キー(ESC [ A/B)は
+ * ESC の直後に残りが連続で届く前提なので、単独の ESC 押下ではここで
+ * すぐ諦めて通常入力へ戻す(ハングしない)。 */
+static int getc_wait_short(void)
+{
+    unsigned t0 = getticks();
+    for (;;) {
+        if (con_pending() || con_rx_ready())
+            return kgetchar();
+        if ((unsigned)(getticks() - t0) >= 1)
+            return -1;
+    }
+}
+#endif
+
+static int readline(const char *prompt, char *buf, int size)
+{
+    int n = 0;
+    int c;
+#if defined(ARCH_X86_IA16)
+    unsigned char back = 0;      /* #45 移植: 0=新規行 / k=k個前のヒストリ表示中 */
+#endif
+
+    kprintf("%s", prompt);
+
+    for (;;) {
+        c = kgetchar() & 0x7F;
+
+#if defined(ARCH_X86_IA16)
+        if (c == 0x1B) {                 /* ESC [ A(↑) / ESC [ B(↓): ヒストリ */
+            int c2 = getc_wait_short();
+            if (c2 != '[') continue;
+            c2 = getc_wait_short();
+            if (c2 == 'A' && back < hist_count()) back++;
+            else if (c2 == 'B' && back) back--;
+            else continue;
+            while (n) { n--; kprintf("\b \b"); }
+            n = back ? hist_get(back, buf) : 0;
+            if (n) kprintf("%s", buf);
+            continue;
+        }
+#endif
+
+        if (c == '\r' || c == '\n') {
+            kputchar('\n');
+            buf[n] = 0;
+            return n;
+        }
+        if (c == 0x04) {
+            if (n == 0) return -1;
+            continue;
+        }
+        if (c == 0x08 || c == 0x7F) {
+            if (n) { n--; kprintf("\b \b"); }
+            continue;
+        }
+        if (c == 0x03) {                 /* Ctrl+C: 行を捨て改行、プロンプト再表示 */
+            kputchar('\n');
+            n = 0;
+#if defined(ARCH_X86_IA16)
+            back = 0;
+#endif
+            kprintf("%s", prompt);
+            continue;
+        }
+        if (c < 0x20 || c > 0x7E) continue;
+
+        if (n < size - 1) {
+            buf[n++] = (char)c;
+            kputchar((char)c);
+        }
+    }
+}
+
 /* path_norm : base(絶対パス)を起点に arg を解決し out へ絶対パスを書く。
  *   ・arg が '/' 始まりなら base を無視してルートから
  *   ・"." は無視、".." は 1 階層戻る(root より上には行かない)

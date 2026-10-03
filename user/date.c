@@ -1,9 +1,15 @@
 /* user/date.c - 外部コマンド date
- *   Unix 秒は カーネルの絶対番地 0x8522 (KW_EPOCH_SEC) にある。
+ *   全アーキ共通。違うのは Unix 秒の取り方(read_epoch)だけ:
+ *
+ *   z80(tzcc): カーネルの絶対番地 0x8522 (KW_EPOCH_SEC) を直接読む。
  *   time_get() ベクタ経由だと 32bit 戻り値の受け渡し規約差で上位/下位ワードが
  *   入れ替わる事象があったため、ここでは直接読む(メモリは flat)。
  *   32bit read は非アトミックなので、2回読んで一致するまで繰り返す
  *   (di/ei をユーザー空間で使わずに済ませる)。
+ *
+ *   syscall で入るアーキ(stdio.h が TZ_SYSCALL を定義。m68k-mega / esp32-wroom-32e):
+ *   カーネルのワークは C の配列の中で、番地がリンクのたびに変わる。stdio.h の
+ *   time_get()(syscall 16)で聞く。
  *
  *   #31 コストモデル対応(2590 -> ):
  *     ・32bit を使う範囲を「epoch 秒 → 日数 + 秒余り」の 1 段だけに限定した。
@@ -15,6 +21,15 @@
  *       除算・乗算は使わない(減算ループのみ)。
  */
 #include "stdio.h"
+
+#ifdef TZ_SYSCALL
+
+static unsigned long read_epoch(void)
+{
+    return time_get();
+}
+
+#else
 
 #define EPOCH_ADDR  ((volatile unsigned long *)0x8522)
 
@@ -28,6 +43,8 @@ static unsigned long read_epoch(void)
         if (a == b) return a;
     }
 }
+
+#endif
 
 static unsigned char days_in_month[] = {
     31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31

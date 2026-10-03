@@ -35,7 +35,7 @@
 #define CWD_MAX    48
 /* プロセス表・出力ルート・セッション状態の置き場所はアーキが決める。
  *   z80: 下の既定(数値番地を直接読み書き。iy_reg 素通し)。
- *   m68k-mega: arch/m68k-mega/user/shvec.h が syscall 版と static 領域で
+ *   gcc 系(m68k-mega / esp32-wroom-32e): shvec.h の gcc 側が syscall 版と static 領域で
  *   先に定義する(カーネルの kwork 番地はリンク時にしか決まらないため)。 */
 #ifndef SH_STATE
 #define SH_STATE   0x8700           /* kmem.h KW_SHSTATE と一致必須。DRIVER fd_table
@@ -371,25 +371,40 @@ static int build_pack(struct sh_state *S, const char *arg,
 /* ================================================================== */
 #define say_ctrlc()  printf("\n^C\n")
 
-/* コマンド名 → "/bin/<cmd>.bin"(先頭が '/' ならそのまま + ".bin")。fname は 24B 以上。 */
+/* コマンド名 → "/bin/<cmd>.bin"(先頭が '/' ならそのまま + ".bin")。fname は BIN_PATH_MAX。
+ * z80(FAT が 8.3)は '-' をディレクトリの区切りに読む(esp32-gpio → /bin/esp32/gpio.bin。#112)。
+ * gcc 側は長いファイル名が使えるので名前のまま(/bin/esp32-gpio.bin。#114)。
+ * src/pipe.c の pipe_fname と同じ規則。 */
+#ifdef TZ_SYSCALL
+#define BIN_PATH_MAX 48
+#else
+#define BIN_PATH_MAX 24
+#endif
 static void bin_path(const char *cmd, char *fname)
 {
     unsigned char i, j;
+    char c;
 
     j = 0;
     if (cmd[0] != '/') {
         fname[j++] = '/'; fname[j++] = 'b'; fname[j++] = 'i';
         fname[j++] = 'n'; fname[j++] = '/';
     }
-    for (i = 0; cmd[i] && j < 18; i++)
-        fname[j++] = cmd[i];
+    for (i = 0; cmd[i] && j < BIN_PATH_MAX - 6; i++) {
+        c = cmd[i];
+#ifndef TZ_SYSCALL
+        if (c == '-' && cmd[0] != '/')
+            c = '/';
+#endif
+        fname[j++] = c;
+    }
     fname[j++] = '.'; fname[j++] = 'b'; fname[j++] = 'i'; fname[j++] = 'n';
     fname[j] = 0;
 }
 
 static unsigned char launch(const char *cmd, const char *argpack, unsigned char argc)
 {
-    char fname[24];
+    char fname[BIN_PATH_MAX];
 
     bin_path(cmd, fname);
     return kexec_argv(fname, argpack, argc);
@@ -398,7 +413,7 @@ static unsigned char launch(const char *cmd, const char *argpack, unsigned char 
 /* コマンドのファイルが無ければ 1(パイプの起動失敗を "not found" と "out of memory" に分けるため)。 */
 static unsigned char cmd_missing(const char *cmd)
 {
-    char fname[24];
+    char fname[BIN_PATH_MAX];
     FILE *f;
 
     bin_path(cmd, fname);

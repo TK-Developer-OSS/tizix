@@ -22,6 +22,9 @@ SECTIONS
 {
     .text 0 :
     {
+        /* 先頭 32B はプロセスの見出し(src/phdr.h。眠り / 起きる時刻の欄)。0 で空けておき、
+         * loader.c は base + 0x20 へ飛ぶ(#112) */
+        . = 0x20;
         *(.text.start)
         *(.text)
         *(.text.*)
@@ -39,7 +42,7 @@ SECTIONS
     /DISCARD/ : { *(.comment) *(.note.*) *(.eh_frame) }
 }
 
-/* ★像 + BSS が src/kexec.c の IMG_BUDGET を超えていないことを **リンク時に**
+/* ★像 + BSS が loader.c の IMG_BUDGET を超えていないことを **リンク時に**
  *   確かめる。超えるとどうなるか:
  *     kexec は argv[] とトークンプールを base + IMG_BUDGET に置く。
  *     一方 crt0cmd.s の _start は __bss_start..__bss_end を 0 クリアする。
@@ -47,11 +50,11 @@ SECTIONS
  *   症状は「コマンドが引数なしで起動して usage を出す」で、原因から遠い。
  *   2026-09-24 に vi(bss_end = 16288)で実際に踏んだ。
  *
- *   値は src/kexec.c の IMG_BUDGET と一致させること(言語が違うので
+ *   値は loader.c の IMG_BUDGET と一致させること(言語が違うので
  *   共有できない。片方を変えたら必ずもう片方も)。 */
 /* ADDR(.text) を引いて **VMA 相対**で見る。通常ビルドは VMA=0 なので同じだが、
  * 位置独立の検証(同じ .o を別 VMA でリンクしてバイト比較する手口)で
  * 高位番地へリンクしたときに誤って弾かないため。予算は「像の大きさ」の
  * 話であって「番地」の話ではない。 */
 ASSERT(__bss_end - ADDR(.text) <= 0x6000,
-       "image+BSS exceeds IMG_BUDGET (0x6000). See src/kexec.c IMG_BUDGET.")
+       "image+BSS exceeds IMG_BUDGET (0x6000). See loader.c IMG_BUDGET.")

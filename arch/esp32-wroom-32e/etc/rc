@@ -1,0 +1,7 @@
+# tizix startup (line<48B)
+echo rc: started
+rsyslog rc-ok
+# esp32-* daemon (comment out if unused)
+esp32d &
+# MCP server for AI clients (#110). port 8000
+# mcpd &

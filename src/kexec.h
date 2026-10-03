@@ -9,16 +9,11 @@
  * トークンを空白で繋いで kexec_file へ渡すので、引用符内の空白は保たれない)。 */
 unsigned char kexec_argv(const char *fname, const char *argpack, unsigned char argc);
 
-#if defined(ARCH_X86_IA16) || defined(ARCH_M68K_MEGA)
-
-/* FAT 上の fname を空きセグメントへロードしてスケジューラに登録。
- * 戻り値: 1..7=slot / 0=空き無し / 0xFF=ファイル無し。 */
+/* 旧 2 引数入口。arg 全体を 1 トークン扱いで argv 化する(init.c の sh 起動等)。
+ * 戻り値は kexec_argv と同じ。 */
 unsigned char kexec_file(const char *fname, const char *arg);
 
-#else
-
-/* 旧 2 引数入口。arg 全体を 1 トークン扱いで argv 化する(init.c の sh 起動等)。 */
-unsigned char kexec_file(const char *fname, const char *arg);
+#if !defined(ARCH_X86_IA16) && !defined(PLAT_FLAT32)
 
 /* #35: 子を起動して終了まで待つ(同期実行)。sh 以外のコマンドから使う入口。
  * メモリ保護が無いので、子は argv で渡した絶対アドレスから親のバッファを

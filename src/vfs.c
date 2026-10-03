@@ -25,6 +25,11 @@
 /* KW_VTREE(0x8419) を struct vnode 配列として見る。KW_VTREE_N 個。 */
 #define VTREE   ((struct vnode *)KW_VTREE)
 #define VTREE_N KW_VTREE_N
+#if defined(PLAT_FLAT32)
+/* kwork の中の枠は 1 個 20B で取ってある(src/kmem.h の KW_VTREE_SIZE)。ポインタが
+ * 太るアーキで struct vnode が枠を越えたら、隣の項目を踏む前にビルドを止める。 */
+typedef char kw_vnode_fits[(sizeof(struct vnode) * KW_VTREE_N <= KW_VTREE_SIZE) ? 1 : -1];
+#endif
 
 /* fd 採番カウンタ。KW_NEXTFD(0x8519) に 1B 固定配置。
  * 8bit 単調増加。一周でハング許容(方針)。 */

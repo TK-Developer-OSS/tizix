@@ -87,6 +87,12 @@ if tzpaths.ARCH == "m68k-mega":
     # m68k: 32KB スロット 1..30。sh(slot 1)+ free 自身の 2 枠。
     check("free: used 2 free 28 run 28",
           "used 2 (64KB)  free 28 (896KB)  largest free run 28 (896KB)" in got, got)
+    check("free: 見出し", "slots 1-30: 30 x 32KB = 960KB" in got, got)
+elif tzpaths.ARCH == "esp32-wroom-32e":
+    # esp32: スロット 1..5、1 枠 32KB(命令 16 + データ 16)。sh(slot 1)+ esp32d(/etc/rc)+ free 自身の 3 枠。
+    check("free: used 3 free 2 run 2",
+          "used 3 (96KB)  free 2 (64KB)  largest free run 2 (64KB)" in got, got)
+    check("free: 見出し", "slots 1-5: 5 x 32KB = 160KB" in got, got)
 else:
     check("free: used 4 free 2 run 2",
           "used 4 (16KB)  free 2 (8KB)  largest free run 2 (8KB)" in got, got)

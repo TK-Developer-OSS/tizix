@@ -4,10 +4,12 @@
 /* ==================================================================
  * 層1: ROM 常駐の物理コンソール (最終フォールバック)
  *
- *  ここ(con.c)だけがコンソールのポートを直接叩く。tizix 内の
- *  唯一の物理層真実であり、ボード差分の隔離点でもある。
- *    cpmsim : port 0(status) / 1(data)
- *    実機   : FT245RL を同じ port 0/1 に合わせてある
+ *  ここ(arch/<arch>/console.c。旧名 con.c)だけがコンソールのポートを
+ *  直接叩く。tizix 内の唯一の物理層真実であり、ボード差分の隔離点でもある。
+ *    z80pack   : cpmsim の port 0(status) / 1(data)
+ *    x86-ia16 / m68k-mega / esp32-wroom-32e : それぞれの UART
+ *    z80board  : 送信は FT245 の port 0x01 へ OUT、受信は crt0.s の ISR が
+ *                埋めるリング(KW_RXBUF)から取る
  *
  *  層1 は「生 1 バイトの入出力」だけを行う。変換は一切しない:
  *    - '\n' → CR+LF の付加は行わない        (層2 = io.c putchar の責務)
@@ -28,5 +30,6 @@
 void          con_putc(char c);        /* 生 1 バイト送出(変換なし)     */
 unsigned char con_getc(void);          /* 生 1 バイト受信。到着まで待つ  */
                                        /* 0x00-0xFF を返す(符号拡張禁止) */
+int           con_rx_ready(void);      /* 受信 1 バイトあり?(待たない)  */
 
 #endif

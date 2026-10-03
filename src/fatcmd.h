@@ -19,7 +19,14 @@ void kpath_init(void);                           /* cwd="/root"。fat_init か�
 /* kdir: backend 透過のディレクトリ反復(外部 ls 用、drv_tbl[21..23])。同時 1 個。 */
 int  kdir_open(const char *path) __sdcccall(0);  /* 0=ok / -1=fail。cwd 起点で解決 */
 int  kdir_open_abs(const char *path) __sdcccall(0); /* 解決済み絶対パス用(内部) */
-int  kdir_read(char *name) __sdcccall(0);        /* 1=name あり / 0=終端。name>=13B */
+int  kdir_read(char *name) __sdcccall(0);        /* 1=name あり / 0=終端。name>=KNAME_MAX */
+/* ディレクトリの 1 項目の名前の長さ(NUL 込み)。z80 は 8.3(12 + NUL)、gcc 系は長いファイル名
+ * (src/ffconf.h の FF_LFN_BUF、UTF-8。#114) */
+#if defined(PLAT_FLAT32)
+#define KNAME_MAX  65
+#else
+#define KNAME_MAX  13
+#endif
 void kdir_close(void) __sdcccall(0);
 unsigned long kdir_size(void) __sdcccall(0);     /* 直前 kdir_read のサイズ(dir/dev=0)。drv_tbl[38] */
 

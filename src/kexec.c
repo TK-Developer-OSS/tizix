@@ -168,142 +168,86 @@ unsigned char kload_driver(void)
 {
 	return 0;      /* x86 に常駐 DRIVER は無い(コマンドは int 0x80 で直接) */
 }
-#elif defined(ARCH_M68K_MEGA)
-/* m68k-mega: #47 で実装、#50 で複数スロット化、**#61 で PIC 化**。
+#elif defined(PLAT_FLAT32)
+/* ---- PLAT_FLAT32(m68k-mega / esp32-wroom-32e …): スロット方式、全ポート共通 ----
+ *   slot n(1..KW_NSLOT-1)が空いていれば、そこへ像を載せてプロセス表に登録する。
+ *   ここにアーキに依る中身は無い。像の置き方と最初の文脈の形だけが CPU と
+ *   ボードで違うので、その 2 点は arch/<arch>/loader.c の plat_load / plat_ctx に
+ *   任せる(約束は src/loader.h):
+ *     m68k-mega        -mpcrel の位置独立コードを 1 本そのまま読む。書き換え無し(#61)
+ *     esp32-wroom-32e  コードとデータを別の枠へ置き、再配置表を当てる(#108)
  *
- * 以前は「固定アドレスに固定リンク、スロットごとにベースをずらす」再配置
- * ゼロの構成だった。そのため (a) コマンドごとにスロット数ぶんの .bin を
- * 再リンクする必要があり(ls1.bin/ls2.bin/…)、(b) Makefile の SLOTS と
- * ここの PROC_NSLOT を手で同期させる約束事が残り、(c) 使える番地が
- * リンク時に決まってしまっていた。
- *
- * いまはコマンドを `-mpcrel`(68000 の PC 相対)でコンパイルし、VMA=0 で
- * 1 本だけリンクする(arch/m68k-mega/user/cmd.ld)。**ロード時に像を
- * 書き換えない**ので [[loadtime-reloc-forbidden]] の地雷は踏まない ──
- * 68000 は PC 相対アドレッシングを持つので、z80 の iy_reg のような後処理を
- * せずにコンパイラの正規パスで位置独立コードが出る(#61 の調査で ls.c の
- * 絶対再配置 R_68K_32 x32 が R_68K_PC16 x29 になり、絶対参照が消えることを確認)。
- * crt0cmd.s も手書きなので PC 相対だけで書いてある。
- *
- * 残る制約は PC 相対変位が 16bit = ±32KB であること。像(コード+データ+BSS)が
- * 32KB 以内なら中のどこへでも届く。IMG_BUDGET は 24KB なので制約にならない。
- *
- * 偽コンテキストは crt0.s の irq6_handler/trap0_handler が使う保存形式と
- * 完全に一致させる必要がある(movem.l %d0-%d7/%a0-%a6 の並び + SR:PC)。
- * ここが崩れると起動直後に Address Error 等でハングするので、フィールド
- * 順序を変えたら crt0.s 側も必ず合わせて直すこと。 */
-#include "kmem.h"
-
-/* PROC_NSLOT: 同時に動かせる外部コマンド数。**#61 の PIC 化でビルドコストと
- * 無関係になった** ── 以前はスロットを増やすとその数だけ全コマンドを再リンク
- * する必要があったが、いまは .bin が 1 本なので、増やす代償は
- * src/kmem.h の KW_* テーブル(u8[NSLOT+1] / u32[NSLOT+1])と kwork の
- * 大きさだけ。現在は 62 枠 = テーブル 63 エントリ。
- *
- * メモリ側の上限: PROC_BASE(n) = 0x8000 + (n-1)*16KB なので、
- * 62 枠で 0x8000〜0x100000。**実機 SRAM 1MB をちょうど使い切る**。枠数を変える時は
- * src/kmem.h の M68K_NSLOT と KW_* オフセットを一緒に採り直すこと。 */
-#define PROC_NSLOT   (M68K_NSLOT - 1)       /* slot 1..62(0 は kernel/shell)。定義は src/kmem.h */
-#define PROC_SIZE    0x8000UL              /* 32KB/プロセス */
-#define PROC_BASE(n) (0x8000UL + ((unsigned long)(n) - 1UL) * PROC_SIZE)
-#define IMG_BUDGET   0x6000UL              /* 24KB。**像 + BSS** の上限(コードだけではない)。
-                                           * arch/m68k-mega/user/cmd.ld の ASSERT と一致させること ──
-                                           * 超えると crt0 の BSS クリアが kexec の置いた argv[] を
-                                           * 消し、コマンドが「引数なし」で起動する(vi で実際に踏んだ)。 */
-#define CTX_SIZE     0x42UL                /* D0-D7/A0-A6(60B)+SR(2B)+PC(4B) */
-
-/* #61: カーネル(slot 0)のスタックは link-kernel.ld の __stack_top =
- * 0x100000 から下へ伸びる。最上位スロットの上端がそこへ食い込むと、
- * 症状が「たまに落ちる」形で出て追いにくいので、16KB を予約したうえで
- * 越えたらビルドを止める。 */
-#define KSTACK_RESERVE  0x4000UL
-typedef char proc_area_fits[(PROC_BASE(PROC_NSLOT) + PROC_SIZE
-                             <= 0x100000UL - KSTACK_RESERVE) ? 1 : -1];
-#define AV_MAX       32                    /* argv[] 枠数(末尾 NULL 込み) */
-/* スタックは [AVPOOL_BASE+AVPOOL_SIZE, PROC_TOP) = 7168B。FatFs の呼び出し
- * 深度に対して十分な余裕を見た(実測: ls / 相当で数百B程度)。
- * #47 バグ修正の教訓: argv[]/pool は **イメージ直後の固定位置**に置き、
- * スタック(PROC_TOP から下へ伸びる)とは完全に分離すること(ブロック
- * 最上端に置くとスタックがそのまま踏み潰す)。偽コンテキスト(66B)だけは
- * PROC_TOP 直下に置く(スタックとして即座に再利用される前提の一時領域)。 */
+ *   #47 の教訓: argv[] と文字列は **像の直後の決まった場所**に置き、スタック(枠の
+ *   頂上から下へ伸びる)とは離す。枠の最上端に置くとスタックがそのまま踏み潰す。
+ *   偽コンテキストだけは頂上の直下に置く(すぐスタックとして再利用される一時領域)。 */
+#include "loader.h"
+#include "mbox.h"
 
 unsigned char kexec_argv(const char *fname, const char *argpack, unsigned char argc)
 {
     FIL fp;
-    UINT br;
-    unsigned char *pid = (unsigned char *)KW_PIDTAB;
+    volatile unsigned char *pid = (volatile unsigned char *)KW_PIDTAB;
     unsigned long *spt = (unsigned long *)KW_SPTBL;
-    unsigned long base, top, avpool_base;
-    unsigned char *dst;
-    unsigned long *ctx;
-    unsigned short *ctx_sr;
-    unsigned long  *ctx_pc;
-    char     *pool;
+    struct kimage im;
     unsigned long *av;
-    unsigned char n;
+    char *pool;
+    unsigned char n, r, need, j;
     unsigned di, k, nv;
-
-    for (n = 1; n <= PROC_NSLOT; n++)
-        if (pid[n] == 0)
-            break;
-    if (n > PROC_NSLOT)
-        return 0;                          /* 空きスロット無し */
-
-
-    base = PROC_BASE(n);
-    top  = base + PROC_SIZE;
-    avpool_base = base + IMG_BUDGET;
-    dst    = (unsigned char *)base;
-    ctx    = (unsigned long *)(top - CTX_SIZE);
-    ctx_sr = (unsigned short *)(top - CTX_SIZE + 60);
-    ctx_pc = (unsigned long  *)(top - CTX_SIZE + 62);
-    pool   = (char *)(avpool_base + AV_MAX * 4);
-    av     = (unsigned long *)avpool_base;
 
     if (f_open(&fp, fname, FA_READ) != FR_OK)
         return 0xFF;
-    if ((unsigned long)f_size(&fp) > IMG_BUDGET) {
+    /* #113: 像が何スロット要るかをローダーに聞き、連続して空いているところを探す
+     * (z80 の連続 N ブロックと同じ。2 個目以降は PID_CONT) */
+    need = plat_need(&fp);
+    if (need == 0xFF || need == 0) {
         f_close(&fp);
-        return 0;
+        return 0xFF;
     }
-    f_read(&fp, dst, (UINT)IMG_BUDGET, &br);
+    for (n = 1; n + need <= KW_NSLOT; n++) {
+        for (j = 0; j < need && pid[n + j] == 0; j++)
+            ;
+        if (j == need)
+            break;
+    }
+    if (n + need > KW_NSLOT) {
+        f_close(&fp);
+        return 0;                          /* 連続した空きが無い */
+    }
+    r = plat_load(&fp, n, need, &im);
     f_close(&fp);
+    if (r != 1)
+        return r;                          /* 0 = 入らない / 0xFF = 像が変 */
 
-    /* argv[] 配列 + トークン文字列プール(pool の残り容量は十分大きい:
-     * IMG_BUDGET〜PROC_TOP の間 0x2000B から AV_MAX*4+CTX_SIZE を引いても
-     * 700B超)。 */
+    /* argv[] 配列 + トークン文字列(argpack と同じ並びのまま写す) */
+    av   = (unsigned long *)im.argv;
+    pool = (char *)(av + KEXEC_AV_MAX);
     nv = argc;
-    if (nv > AV_MAX - 1) nv = AV_MAX - 1;
+    if (nv > KEXEC_AV_MAX - 1) nv = KEXEC_AV_MAX - 1;
     di = 0;
     for (k = 0; k < nv; k++) {
         av[k] = (unsigned long)(pool + di);
         if (argpack)
-            while (argpack[di] && di < 0x2C0) { pool[di] = argpack[di]; di++; }
+            while (argpack[di] && di < KEXEC_POOL_MAX) { pool[di] = argpack[di]; di++; }
         pool[di++] = '\0';
     }
     av[nv] = 0;
 
-    /* 偽コンテキスト: crt0.s の movem 復元順(D0..D7,A0..A6)と一致させる。 */
-    for (k = 0; k < 15; k++)
-        ctx[k] = 0;
-    ctx[0] = nv;                            /* D0 = argc */
-    ctx[8] = (unsigned long)av;             /* A0 = &argv[0] */
-    *ctx_sr = 0x2000;                       /* S=1, 割込みマスク=0 */
-    *ctx_pc = base;                         /* PC = crt0cmd _start */
-
     ps_note(n, fname, argpack, (unsigned char)nv);   /* #78: z80 と同じ ps 表示 */
 
-    spt[n] = top - CTX_SIZE;
+    spt[n] = plat_ctx(&im, nv, (unsigned long)av);
     PROC_CLEAR_BLOCKED(n);                  /* #72 */
+    mbox_slot_reset(n);                     /* #112: 前の占有者の郵便受け・依頼を持ち越さない */
     /* #82: 出力ルートを CONSOLE(0)に戻す(z80 の kexec と同じ)。前の占有者が
      * パイプの writer だった枠を再利用すると、出力がパイプへ流れてしまう。 */
     ((volatile unsigned char *)KW_OUTROUTE)[n] = 0;
+    for (j = 1; j < need; j++)
+        pid[n + j] = PID_CONT;             /* 先に続きを予約してから先頭を立てる(走り出すのは先頭) */
     pid[n] = n;
     return n;
 }
 
-/* #48: src/sh.c は引数をトークンに割って kexec_argv を呼ぶ(上)。ここは
- * 旧 2 引数入口で、arg 全体を 1 トークンとして argv に載せる。 */
+/* #48: sh は引数をトークンに割って kexec_argv を呼ぶ(上)。ここは
+ * 旧 2 引数入口で、arg 全体を 1 トークンとして argv に載せる(init の sh 起動)。 */
 unsigned char kexec_file(const char *fname, const char *arg)
 {
     return kexec_argv(fname, arg, (arg && arg[0]) ? 1 : 0);
@@ -311,7 +255,7 @@ unsigned char kexec_file(const char *fname, const char *arg)
 
 unsigned char kload_driver(void)
 {
-    return 0;      /* m68k-mega に常駐 DRIVER は無い(x86 と同じ) */
+    return 0;      /* 常駐 DRIVER は無い(コマンドは syscall で直接カーネルへ) */
 }
 #else
 

@@ -74,6 +74,39 @@
 /* レベル6周期割込み(Mega Timer5、周期は Makefile の TICK_HZ)。オートベクタ #30(offset 0x78)。 */
 #define IRQ_TIMER_VECNO  30
 
+/* ---- 共有 src/ に対するこのポートの素性 -------------------------------------
+ *   src/ の分岐はアーキの名前ではなく、ここで名乗る PLAT_FLAT32 を見る
+ *   (新しいポートを足すときに src/ の #if を書き足さずに済ませるため)。
+ *
+ *   PLAT_FLAT32        gcc の 32bit フラットなポートの一族。カーネルのワークは C 配列
+ *                      kwork[](番地は src/kmem.h が積み上げる)、外部コマンドはスロット
+ *                      1..N-1、コンソールは console.c の con_*、syscall は src/sysfile.c、
+ *                      コマンドのロードは loader.c の plat_load / plat_ctx。
+ *   PLAT_NSLOT         スロット数(slot0 = カーネル + init 込み)。**唯一の定義場所**
+ *                      ── スケジューラの走査範囲も kwork の表の大きさもここから導く。
+ *   PLAT_SLOT_ADDR(n)  スロット n(1..)のメモリの先頭。loader.c と、カーネルパイプの
+ *                      バッファ枠を取る src/pipe.c が引く。
+ *   PROC_SLOT_KB       1 スロットの大きさ(KB)。/bin/free の表示用。
+ *
+ *   slot 1..30 は 32KB ずつ、0x8000〜0xF8000。最上位の 16KB は **カーネル(slot 0)の
+ *   スタック用に空けてある** ── link-kernel.ld の __stack_top = 0x100000 から下へ伸びるので、
+ *   ここまでプロセスを置くと衝突する(loader.c の proc_area_fits がビルド時に見張る)。
+ *   コマンドは PIC で .bin が 1 本なので、スロットを増やす代償は kwork の表だけ。 */
+#define PLAT_FLAT32       1
+#define PLAT_NSLOT        31
+#define PLAT_SLOT_SIZE    0x8000UL
+#define PLAT_SLOT_ADDR(n) ((unsigned long)(n) * 0x8000UL)
+#define PROC_SLOT_KB      32
+
+/* 割込みの禁止/許可。SR の割込みマスク(bit 8-10)だけ操作。他ビット(S/T)は触らない。 */
+#define IRQ_OFF()  __asm__ volatile ("ori.w  #0x0700,%%sr" ::: "memory")
+#define IRQ_ON()   __asm__ volatile ("andi.w #0xf8ff,%%sr" ::: "memory")
+/* #94: 待ちループ(sh の前景待ち・入力待ち・init・getticks)から自分で譲る。
+ * TRAP #1 = crt0.s の trap1_handler(タイマ割込みと同じ save/pick/restore、
+ * tick は進めない)。以前は空で、実機のタイマ 1Hz だと sh が子を起動しても
+ * 次の tick まで自分のスロットで回り続け、外部コマンド 1 回に約 1.5 秒かかった。 */
+#define KYIELD()   __asm__ volatile ("trap #1" ::: "memory")
+
 /* ---- 共有 src/ を m68k-elf-gcc で通すための移植シム(arch/x86-ia16/plat.h
  * と同じ役目)。SDCC 専用の呼出規約属性は m68k-elf-gcc では無意味 → 消す。 */
 #define __sdcccall(n)

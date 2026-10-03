@@ -1,25 +1,25 @@
 #include <stdarg.h>
 #include "io.h"
+#include "console.h"    /* 層1: con_putc / con_rx_ready / con_getc(arch/<arch>/console.c) */
 #include "kmem.h"
 #include "pipe.h"       /* カーネルパイプ routing(ROUTE_PIPE / pipe_is_reader) */
-#if defined(ARCH_X86_IA16)
-#include "fatcmd.h"     /* hist_init/hist_add/hist_get/hist_count(readline 矢印キー用) */
-extern unsigned int getticks(void);
-#endif
 
 /* ==================================================================
  * tizix カーネル I/O (block0)
  *
- *   カーネルの I/O をここに集約。物理層(cpmsim port 0/1)を kputchar/
- *   kgetchar の中に封じ込める ── con.c への分離はしない。「カーネルは
- *   今は環境依存が混じってよい/汎用性はドライバ側に持たせる」線引きに
- *   従い、port 0/1 直叩きをここに置く。FT245RL 等の実機分岐は今は入れ
- *   ない(入れると散らかる。実機移行段でまとめる)。
+ *   カーネルの I/O をここに集約(層2: リダイレクト・パイプ・'\n'→CR+LF・
+ *   戻しバッファ・行編集)。物理層(層1: コンソールのポートを叩く所)は
+ *   arch/<arch>/console.c にあり、ここからは PHYS_* 越しに呼ぶ。
+ *   経緯: 当初は cpmsim の port 0/1 をここに直書きし(「con.c への分離は
+ *   しない。実機分岐は実機移行段でまとめる」)、arch 分離で con.c を
+ *   arch/<arch>/console.c へ移したあとも繋ぎ替えが後回しのままだった。
+ *   2026-09-30 に z80pack と z80board を繋いだ(z80board の ROM は、誰も呼ばなく
+ *   なっていた readline を src/sh.c へ移して空けた)。
  *
  *   kputchar: 物理層 + redir_on("> file") + CUR_ROUTE(/dev/null) +
  *             '\n'→CR+LF。ブート/ログ/パニックもこれ(ドライバ非依存)。
  *   kgetchar: 物理層 + in_on("< file")。戻り 0..255(符号拡張しない)。
- *   kprintf : 書式変換(kputchar を使う上位)。readline: 行編集。
+ *   kprintf : 書式変換(kputchar を使う上位)。
  *
  *   ベクタ(crt0.s, ISR 直後 0x003B〜):
  *     0x003B kexit / 0x003E kputchar / 0x0041 kgetchar /
@@ -28,53 +28,15 @@ extern unsigned int getticks(void);
  *   (番地はヘッダが隠す)。ドライバ(block1)も 0x003E を叩く。
  * ================================================================== */
 
-/* ---- 物理層 -----------------------------------------------------------
+/* ---- 物理層(層1)--------------------------------------------------------
  *   PHYS_PUTC(c)  : 生 1 バイト送出
  *   PHYS_RXRDY()  : 受信 1 バイトあり?(非ブロッキング)
  *   PHYS_GETC()   : 受信 1 バイト取得(RXRDY 済み前提)
+ *   実体は arch/<arch>/console.c(約束は console.h)。ポートの番地はここに書かない。
  */
-#if defined(ARCH_X86_IA16) || defined(ARCH_M68K_MEGA)
-void          con_putc(char c);          /* arch/<arch>/console.c */
-unsigned char con_getc(void);
-int           con_rx_ready(void);
 #define PHYS_PUTC(c)  con_putc((char)(c))
 #define PHYS_RXRDY()  con_rx_ready()
 #define PHYS_GETC()   con_getc()
-#elif defined(ARCH_Z80BOARD)
-/* 実機(#59 実タイマ割り込み化): FT245 の受信ポート(0x01)とステータス
- * ラッチ(0x10, bit6=~RXF)は crt0.s の ISR が排他的に触る。フォアグラウンド
- * 側が同じポートを直接ポーリングすると ISR の読み出しと競合してバイトを
- * 取りこぼす/二重取得するため、ここは ISR が埋める KW_RXBUF リング
- * (kmem.h)だけを見る。送信(PHYS_PUTC)は ISR と競合しないので従来どおり
- * 直接ポートを叩く。 */
-#define CON_DATA 0x01
-__sfr __at CON_DATA CONDATA;
-#define PHYS_PUTC(c)  (CONDATA = (char)(c))
-#define PHYS_RXRDY()  (*(volatile unsigned char *)KW_RXHEAD != \
-                       *(volatile unsigned char *)KW_RXTAIL)
-/* rx_ring_pop: ISR(単一のライタ)とはヘッド/テールが別変数なので di/ei
- * 無しで安全な SPSC リング(#33 con_ung と同じ発想)。KW_RXBUF_SIZE は
- * 2 の冪(#87 で 256)前提で and によりラップする(256 なら 8bit の桁あふれと
- * 同じ。crt0.s の isr と同じ前提)。 */
-static unsigned char rx_ring_pop(void)
-{
-    unsigned char t = *(volatile unsigned char *)KW_RXTAIL;
-    unsigned char c = ((volatile unsigned char *)KW_RXBUF)[t];
-
-    *(volatile unsigned char *)KW_RXTAIL = (t + 1) & (KW_RXBUF_SIZE - 1);
-    return c;
-}
-#define PHYS_GETC()   rx_ring_pop()
-#else
-/* cpmsim console (port 0=status, 1=data)。 */
-#define CON_STAT 0x00
-#define CON_DATA 0x01
-__sfr __at CON_STAT CONSTAT;
-__sfr __at CON_DATA CONDATA;
-#define PHYS_PUTC(c)  (CONDATA = (char)(c))
-#define PHYS_RXRDY()  (CONSTAT != 0)
-#define PHYS_GETC()   (CONDATA)
-#endif
 
 /* 出力リダイレクト: 関数ポインタは使わない(間接呼び出しが iy を汚し、
  * 外部コマンドの iy=base を壊すため)。フラグ + 直接 call にする。 */
@@ -180,12 +142,12 @@ int kgetchar(void)
     }
 }
 
-#if defined(KW_CONRAW) && defined(ARCH_M68K_MEGA)
+#if defined(KW_CONRAW) && defined(PLAT_FLAT32)
 /* con_setraw: 呼んだプロセスの間だけ Ctrl+C を割り込みとして扱わない(on=1)/ 戻す(0)。
  *   tty の raw モード(ISIG 無効)に相当。rx(xmodem)のようにバイナリを端末から
  *   読むコマンドが使う ── シーケンス番号 3 や CRC に 0x03 が現れると、sh の前景待ち
  *   (con_break)がそれを Ctrl+C と取って rx を kill していた。
- *   m68k: syscall 35。z80 は同じ中身を DRIVER の drv_conraw(drv_tbl[48])に置く
+ *   PLAT_FLAT32: syscall 35。z80 は同じ中身を DRIVER の drv_conraw(drv_tbl[48])に置く
  *   (z80board のカーネル ROM に余地が無いため)。 */
 void con_setraw(unsigned char on) __sdcccall(0)
 {
@@ -196,7 +158,7 @@ void con_setraw(unsigned char on) __sdcccall(0)
 /* con_break: コンソールに Ctrl+C(0x03)が来ていれば 1。
  *   前景コマンド実行中の中断検出用(sh の待ちループから非ブロッキングで呼ぶ)。
  *   Ctrl+C 以外の 1 バイトは con_ung へ戻す(捨てない)。
- *   in_on 中(入力リダイレクト)は無効。CONSTAT!=0 = RX-ready は kgetchar と同義。 */
+ *   in_on 中(入力リダイレクト)は無効。PHYS_RXRDY() = RX-ready は kgetchar と同義。 */
 int con_break(void)
 {
     int c;
@@ -262,77 +224,6 @@ int kprintf(const char *fmt, ...)
     return 0;
 }
 
-#if defined(ARCH_X86_IA16)
-/* ESC の次バイトを短時間(1 tick 以内)だけ待つ。矢印キー(ESC [ A/B)は
- * ESC の直後に残りが連続で届く前提なので、単独の ESC 押下ではここで
- * すぐ諦めて通常入力へ戻す(ハングしない)。 */
-static int getc_wait_short(void)
-{
-    unsigned t0 = getticks();
-    for (;;) {
-        if (con_pending() || PHYS_RXRDY())
-            return kgetchar();
-        if ((unsigned)(getticks() - t0) >= 1)
-            return -1;
-    }
-}
-#endif
-
-int readline(const char *prompt, char *buf, int size)
-{
-    int n = 0;
-    int c;
-#if defined(ARCH_X86_IA16)
-    unsigned char back = 0;      /* #45 移植: 0=新規行 / k=k個前のヒストリ表示中 */
-#endif
-
-    kprintf("%s", prompt);
-
-    for (;;) {
-        c = kgetchar() & 0x7F;
-
-#if defined(ARCH_X86_IA16)
-        if (c == 0x1B) {                 /* ESC [ A(↑) / ESC [ B(↓): ヒストリ */
-            int c2 = getc_wait_short();
-            if (c2 != '[') continue;
-            c2 = getc_wait_short();
-            if (c2 == 'A' && back < hist_count()) back++;
-            else if (c2 == 'B' && back) back--;
-            else continue;
-            while (n) { n--; putstr("\b \b"); }
-            n = back ? hist_get(back, buf) : 0;
-            if (n) kprintf("%s", buf);
-            continue;
-        }
-#endif
-
-        if (c == '\r' || c == '\n') {
-            kputchar('\n');
-            buf[n] = 0;
-            return n;
-        }
-        if (c == 0x04) {
-            if (n == 0) return -1;
-            continue;
-        }
-        if (c == 0x08 || c == 0x7F) {
-            if (n) { n--; putstr("\b \b"); }
-            continue;
-        }
-        if (c == 0x03) {                 /* Ctrl+C: 行を捨て改行、プロンプト再表示 */
-            kputchar('\n');
-            n = 0;
-#if defined(ARCH_X86_IA16)
-            back = 0;
-#endif
-            kprintf("%s", prompt);
-            continue;
-        }
-        if (c < 0x20 || c > 0x7E) continue;
-
-        if (n < size - 1) {
-            buf[n++] = (char)c;
-            kputchar((char)c);
-        }
-    }
-}
+/* readline(行編集)は src/sh.c へ移した(2026-09-30)。呼ぶのはカーネル内蔵の sh だけで、
+ * sh を外部コマンドにしたアーキ(z80 / m68k-mega / esp32)では誰も呼ばないのに、
+ * ここにあると io.rel と一緒に丸ごとリンクされていた(z80board の ROM で 230 バイト)。 */

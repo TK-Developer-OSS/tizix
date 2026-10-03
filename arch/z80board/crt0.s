@@ -1,53 +1,27 @@
 .module crt0
 
-        .globl  _init
-        .globl  _plt_interrupt
-        .globl  _kprintf          ; io.c: 書式変換(0x0047)
-        .globl  _kputchar         ; io.c: 1バイト出力/物理層内包(0x003E)
-        .globl  _kgetchar         ; io.c: 1バイト入力/物理層内包(0x0041)
-        .globl  _getticks         ; 100Hz tick 取得 (0x0044, コマンドの delay import)
-        .globl  _time_get         ; kernel.c: Unix 秒取得 (0x004A, DATE.BIN import)
-        .globl  _time_set         ; kernel.c: Unix 秒設定 (0x004D, DATE.BIN import)
-        ; ---- ABI統一ランタイム(ivthelpers)を固定IVT番地に公開 (0x0052〜) ----
-        ;   z80pack と同じ配置。tzcc(TZVEC)/DRIVER/コマンドが -g で直接この
-        ;   番地を叩くので、z80pack ⇔ z80board で 1 バイトもずらせない。
-        .globl  __divuint
-        .globl  __moduint
-        .globl  __divsint
-        .globl  __modsint
-        .globl  __divulong
-        .globl  __mullong
-        .globl  __mulint
-        .globl  _memcmp
-        .globl  _strcmp
-        .globl  l__INITIALIZER
-        .globl  s__INITIALIZER
-        .globl  s__INITIALIZED
-        .globl  s__DATA
-        .globl  l__DATA
+;===================================================================
+; arch/z80board crt0.s(実機 Z80 ボード。ROM 0x0000 から直接実行)
+;
+;   このファイルにあるのは z80board に固有の部分だけ:
+;     ・リセット入口と低位ベクタ(0x0038〜0x006F)を **ROM 上に .org で焼く**
+;       (z80pack は RAM 上なので実行時に書き込む)
+;     ・ラッチと UART(FT245RL)の立ち上げ
+;     ・ISR の入口: Z80_INT の要因(FT245 の受信 / タイマ)の振り分けと、
+;       KYIELD の入口(call 0x006D)
+;   ボードに依らない部分(宣言と定数、RAM とスケジューラ表の初期化、スケジューラ
+;   本体と _kexit、エリア順と gsinit)は ../common-z80/ にあり、z80pack と共有する。
+;   .include した位置にそのままコードが出る。低位ベクタの番地は z80pack と
+;   揃えてある(コマンド / DRIVER / tzcc が -g で直接叩く)。
+;===================================================================
 
-; ---- scheduler PCB (block0 work area, kmem.h と一致させること) ----
-;   z80pack crt0.s と同一番地・同一アルゴリズム(RAM 側のレイアウトは arch に
-;   依存しない。CODE_LOC/DATA_LOC の DATA_LOC=0x8000 が z80pack と揃っている
-;   前提)。
-KW_PIDTAB  = 0x8400        ; pid_tbl[block] 0..7 (8B). 0=free
-KW_SPTBL   = 0x8408        ; sp_tbl[block]  0..7 (2B each)
-KW_CURRENT = 0x8418        ; current running block (1B)
-KW_OUTROUTE= 0x851A        ; out_route[block] 0..7 (8B)。ROUTE_CONSOLE/DISCARD/PIPE
-KW_BLOCKED = 0x8529        ; blocked[block] 0..7 (8B). 1=proc_block 中 → sched が飛ばす
-KW_WAKEPEND= 0x8531        ; wakepend[block] 0..7 (8B). proc_block 前の wake 取りこぼし対策
+        .include "../common-z80/crt0-defs.inc"
 
 ; ---- FT245 受信リング(#59。kmem.h KW_RX* と一致させること) ----
 KW_RXHEAD     = 0x8D96
 KW_RXTAIL     = 0x8D97
 KW_RXBUF      = 0x9F00          ; #87: 256B、ページ境界(下位バイト 0)。block1 の末尾
 KW_RXBUF_SIZE = 256
-
-; ---- PCB pid の予約値 (kmem.h の PID_* と一致させること) ----
-PID_DRIVER  = 0xFE
-PID_CONT    = 0xFD        ; 4KB 超プロセスの継続ブロック(kmem.h/kexec.c と一致)
-PID_PIPEBUF = 0xFC        ; カーネルパイプの 4KB バッファブロック(kmem.h/pipe.c と一致)
-PID_BAD     = 0xFB        ; #64: 起動時メモリチェックで不良だったブロック(kmem.h と一致)
 
 ; ======================================================================
 ; ROM 版 IVT: z80pack crt0.s は起動直後に 0x0038〜0x006C へ `jp target` を
@@ -323,88 +297,8 @@ crt0_str_loadmbr:
 crt0_bringup_done:
         ; SP は start で張り済み(#75)。
 
-        ; --- 未初期化 static (_DATA 域) をゼロクリア ---------------------
-        ;   実機 SRAM は電源 ON 時ゴミ。z80pack crt0.s と同じ理由・同じ処理
-        ;   (FatFs[] 等がゴミポインタで立ち上がるのを防ぐ)。
-        ld      bc, #l__DATA
-        ld      a, b
-        or      a, c
-        jr      Z, 1$
-        ld      hl, #s__DATA
-        ld      (hl), #0x00
-        dec     bc
-        ld      a, b
-        or      a, c
-        jr      Z, 1$
-        ld      de, #s__DATA + 1
-        ldir
-1$:
-
-        call    gsinit
-
-        ; --- scheduler: PCB 初期化 ---
-        ;   z80pack crt0.s と同一(block0=idle/pid1, block1=DRIVER 予約,
-        ;   block2..7=プロセス枠を 0 クリア)。
-        xor     a
-        ld      (KW_CURRENT), a        ; current = 0 (block0)
-        ld      hl, #KW_PIDTAB + 2     ; &pid_tbl[2]
-        ld      b, #6                  ; block 2..7 を 0 クリア(プロセス枠)
-2$:
-        ld      (hl), a                ; pid_tbl[n] = 0 (free)
-        inc     hl
-        djnz    2$
-        ld      a, #1
-        ld      (KW_PIDTAB + 0), a     ; pid_tbl[0] = 1 (idle, 常時 runnable)
-        ld      a, #PID_DRIVER
-        ld      (KW_PIDTAB + 1), a     ; pid_tbl[1] = PID_DRIVER (block1 予約)
-
-        ; --- #64 起動時メモリチェック: プロセス枠 block2..7(0xA000-0xFFFF)---
-        ;   1 バイトずつ 0x55 / 0xAA を書いて読み戻す(固着ビット・欠けたチップ)。
-        ;   食い違ったブロックは pid_tbl を PID_BAD にして **二度と使わせない**
-        ;   (kexec は非 0 を使用中とみなし、sched_pick は PID_BAD を飛ばす)。
-        ;   /bin/free のマップに 'x' で出る。アドレス線の短絡までは見ない。
-        ;   24KB で実機 8MHz 約 0.2 秒。z80pack / z80board の crt0.s で同じ手順。
-        ld      hl, #0xA000
-        ld      de, #KW_PIDTAB + 2
-mc_blk:
-        ld      bc, #0x1000
-mc_byte:
-        ld      a, #0x55
-        ld      (hl), a
-        cp      (hl)
-        jr      nz, mc_bad
-        cpl                            ; 0xAA
-        ld      (hl), a
-        cp      (hl)
-        jr      nz, mc_bad
-        inc     hl
-        dec     bc
-        ld      a, b
-        or      c
-        jr      nz, mc_byte
-        jr      mc_next
-mc_bad:
-        ld      a, #PID_BAD
-        ld      (de), a                ; pid_tbl[n] = PID_BAD
-        ld      a, h
-        or      #0x0F
-        ld      h, a
-        ld      l, #0xFF
-        inc     hl                     ; 残りを飛ばして次のブロックの先頭へ
-mc_next:
-        inc     de
-        ld      a, h
-        or      a                      ; block7 の後で HL は 0x0000 に一周する
-        jr      nz, mc_blk
-
-        ; 0x851A..0x8544 を 0 クリア(43B、KW_CONRAW まで)。RAM ゴミ対策(z80pack と同じ)。
-        ld      hl, #KW_OUTROUTE
-        ld      b, #43
-        xor     a
-3$:
-        ld      (hl), a
-        inc     hl
-        djnz    3$
+        ; --- ここから共通: _DATA のゼロ埋め / gsinit / PCB 初期化 / メモリチェック ---
+        .include "../common-z80/crt0-init.inc"
 
         ; FT245 受信リング(#59)の head/tail を 0 クリア。ゴミのまま
         ; head!=tail になっていると起動直後に kgetchar() が幽霊バイトを
@@ -505,141 +399,10 @@ kyield_entry:
         jr      isr_save                ; tick は数えない(上の ★)
 
 ; ---- isr_timer: GP5 起因。ticks++ の後 save/pick/restore ----------------
-;   z80pack crt0.s の isr と同一アルゴリズム。af は isr: で既に push 済み
-;   なので、残り 5 レジスタだけ積んで tick_and_save で合流する。
+;   ここから先は z80pack と共通(../common-z80/crt0-sched.inc)。af は isr: で
+;   既に push 済みなので、共通部分が残り 5 レジスタを積んで tick を進める。
+;   上の kyield_entry が飛び込む isr_save も共通部分の中にある。
 isr_timer:
-        push    bc
-        push    de
-        push    hl
-        push    ix
-        push    iy
-tick_and_save:
-        call    _plt_interrupt        ; ticks++ (既存の C ハンドラ)
-isr_save:
-        ; sp_tbl[current] = SP
-        ld      a, (KW_CURRENT)
-        add     a, a
-        add     a, #0x08
-        ld      e, a
-        ld      d, #0x84
-        ld      hl, #0
-        add     hl, sp
-        ex      de, hl
-        ld      (hl), e
-        inc     hl
-        ld      (hl), d
-sched_pick:
-        ld      a, (KW_CURRENT)
-rr_lp:
-        inc     a
-        cp      #8                    ; block0..7 を巡回(block7 はプロセス枠に復帰)
-        jr      c, rr_chk
-        xor     a                     ; wrap to 0 (block0=idle をローテに含む)
-rr_chk:
-        ld      b, a                  ; b = 候補ブロック番号(スクラッチ)
-        ld      l, a
-        ld      h, #0x84
-        ld      a, (hl)               ; a = pid_tbl[block]
-        or      a
-        jr      z, rr_next            ; pid==0(free) → 飛ばす
-        cp      #PID_DRIVER
-        jr      z, rr_next            ; pid==PID_DRIVER(block1予約) → 飛ばす
-        cp      #PID_CONT
-        jr      z, rr_next            ; pid==PID_CONT(継続枠) → 飛ばす
-        cp      #PID_PIPEBUF
-        jr      z, rr_next            ; pid==PID_PIPEBUF(カーネルパイプ枠) → 飛ばす
-        cp      #PID_BAD
-        jr      z, rr_next            ; pid==PID_BAD(#64 起動時メモリチェックで不良)→ 飛ばす
-        ld      a, b
-        or      a
-        jr      z, rr_ok              ; block0(idle/シェル)は常に runnable
-        add     a, #0x29             ; (KW_BLOCKED & 0xFF)
-        ld      l, a
-        ld      h, #0x85
-        ld      a, (hl)
-        or      a
-        jr      nz, rr_next
-        jr      rr_ok
-rr_next:
-        ld      a, b
-        jr      rr_lp
-rr_ok:
-        ; --- 実機プローブ: 切り替え先ブロック番号を最初の 16 回だけ出す ---
-        ;ld      a, (isr_probe_n)
-        ;cp      #16
-        ;jr      nc, rr_probe_done
-        ;ld      a, b
-        ;add     a, #'0'
-        ;out     (0x01), a
-;rr_probe_done:
-        ld      a, b
-        ld      (KW_CURRENT), a
-        add     a, a
-        add     a, #0x08
-        ld      l, a
-        ld      h, #0x84
-        ld      e, (hl)
-        inc     hl
-        ld      d, (hl)
-        ex      de, hl
-        ld      sp, hl
-        pop     iy
-        pop     ix
-        pop     hl
-        pop     de
-        pop     bc
-        pop     af
-        ; #59: isr_timer(ハード割り込み、GP5 起因)/kyield_entry(call
-        ; 0x006D)のどちらから来た場合も ei してから reti(z80pack と同じ
-        ; 作法)。
-        ei
-        reti
+        .include "../common-z80/crt0-sched.inc"
 
-; ---- _kexit : コマンド終了。現ブロックを解放し次へ切替 --------------
-;   z80pack と同一(コマンドの crt0cmd が main 復帰後に jp _kexit してくる)。
-_kexit:
-        di
-        ld      a, (KW_CURRENT)
-        ld      l, a
-        ld      h, #0x84              ; hl = &pid_tbl[current]
-        ld      (hl), #0              ; 先頭ブロック解放 (0=free)
-kx_cont:
-        inc     l
-        ld      a, l
-        cp      #8
-        jr      nc, kx_done          ; pid_tbl[] は 0..7。範囲外は打ち切り
-        ld      a, (hl)
-        cp      #PID_CONT
-        jr      nz, kx_done          ; 継続ブロックでない → 終わり
-        ld      (hl), #0             ; 継続ブロック解放
-        jr      kx_cont
-kx_done:
-        jp      sched_pick           ; save を飛ばして次を pick→restore
-
-        .area   _HOME
-        .area   _CODE
-        .area   _INITIALIZER
-        .area   _GSINIT
-        .area   _GSFINAL
-
-        .area   _DATA
-;isr_probe_n:                   ; 実機プローブ用の割り込み回数カウンタ(無効化中)
-;        .ds     1
-        .area   _INITIALIZED
-        .area   _BSEG
-        .area   _BSS
-        .area   _HEAP
-
-        .area   _GSINIT
-gsinit::
-        ld      bc, #l__INITIALIZER
-        ld      a, b
-        or      a, c
-        jr      Z, gsinit_next
-        ld      de, #s__INITIALIZED
-        ld      hl, #s__INITIALIZER
-        ldir
-gsinit_next:
-
-        .area   _GSFINAL
-        ret
+        .include "../common-z80/crt0-areas.inc"

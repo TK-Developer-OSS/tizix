@@ -11,6 +11,16 @@
 #include "kexec.h"
 #endif
 
+/* arch が差し込める場所(既定は何もしない / 自分から譲るだけ)。
+ *   PLAT_LATE_INIT: FAT をマウントした後、sh を起こす前(esp32: /etc/wifi を読んで WiFi を起こす)
+ *   PLAT_IDLE:      init が sh の終了を待つ間の 1 回分(esp32: WiFi のスレッドに順番を回してから譲る) */
+#ifndef PLAT_LATE_INIT
+#define PLAT_LATE_INIT()
+#endif
+#ifndef PLAT_IDLE
+#define PLAT_IDLE()  KYIELD()
+#endif
+
 void init(void)
 {
     kernel_init();
@@ -40,6 +50,7 @@ void init(void)
         kprintf("tizix\n");
         klog_write("tizix boot");       /* /var/log/message にも記録(/etc, /var/log
                                           * が無い旧ディスクでは klog_write が黙って何もしない) */
+        PLAT_LATE_INIT();
 
         /* z80board 実機プローブ [i1]〜[i3](2026-09-19 のブリングアップで使用)。
          * 再度使う時は 1 に(src/kexec.c の KEXEC_PROBE と併用)。 */
@@ -60,7 +71,7 @@ void init(void)
             kprintf("[i3 pid=%u]\n", (unsigned)pid[n]);  /* sh 起動待ちへ入る */
 #endif
             while (pid[n] != 0)          /* sh の終了を待って respawn */
-                KYIELD();                /* z80board: タイマ未結線なので自分から譲る(#54) */
+                PLAT_IDLE();             /* 既定は KYIELD(z80board: タイマ未結線なので自分から譲る #54) */
         }
     }
     for (;;)

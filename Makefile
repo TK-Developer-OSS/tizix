@@ -4,7 +4,7 @@
 #   (ARCH ごとにツールチェイン/ビルド手順が全く異なるため、共通ロジックを
 #    ここに書かない。z80 系(sdcc)の共通部分は arch/common-sdcc.mk)。
 #   ARCH=z80pack (既定, cpmsim) / z80board (実機ROM) / x86-ia16 / x86-i386 /
-#        m68k-mega
+#        m68k-mega / esp32-wroom-32e
 #   例: make ARCH=z80board / make ARCH=x86-ia16 run
 #===================================================================
 ARCH ?= z80pack

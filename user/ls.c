@@ -15,6 +15,9 @@
  *   #31: printf(546B)をやめ libtzc の prnum/prs(共有)で組む。
  */
 #include "stdio.h"
+#ifndef TZ_NAME_MAX
+#define TZ_NAME_MAX 16   /* z80: 8.3(gcc 側は stdio.h が長いファイル名の 65 にする。#114) */
+#endif
 
 /* -l のサイズ欄を出力(末尾に空白 2 個)。t==2(ディレクトリ)は <DIR>。
  * #31: 仮引数を廃止し、ファイルスコープの t / hflag を直接見る。 */
@@ -38,7 +41,7 @@ static void put_size(void)
 int main(int argc, char **argv)
 {
     char *path = 0;
-    char name[16];
+    char name[TZ_NAME_MAX];
     char *q;
 
     int  lflag = 0;

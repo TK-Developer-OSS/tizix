@@ -144,6 +144,16 @@ else
     echo "=== z80board (z80boardsim) === SKIP: $([ -n "${REGRESS_SKIP_Z80BOARD:-}" ] && echo "REGRESS_SKIP_Z80BOARD が立っている" || echo "arch/z80board/z80boardsim が無い(make sims)")"
 fi
 
+# スロット方式(PLAT_FLAT32)のアーキで回すテスト。m68k-mega と esp32-wroom-32e は
+# 共有 src/ の同じコード(kexec・syscall・スケジューラの C 側)を通るので、一覧も 1 つにする。
+# z80 と共通のテストで、tzpaths が TIZIX_ARCH を見て各シミュレータを起動する。
+#   入れていないもの: test_spawn / test_ovl / test_xblk / test_calli / test_5a_waitwake
+#   (z80 の追加ブロック・オーバーレイ・krun_wait・blk/wak を使う。こちらには無い機能)
+FLAT32_TESTS="test_args test_ls_format test_ps_m68k test_pwd_cd test_sh_hist \
+              test_vfs_step8 test_vfs_step9 test_vfs_step10 test_5b_pipe \
+              test_cmds_all test_dev_dd test_sed test_pipe_kill test_vi test_rx test_rx_cksum \
+              test_mbox test_lfn test_tzsh"
+
 # m68k-mega(m68ksim)。リリース対象の 3 アーキ目。REGRESS_SKIP_M68K=1 で省略できる。
 # m68ksim は下の make が作る(rocket68 のソースがあれば)。以前は「m68ksim が既にある」ことを
 # 条件にしていて、新しく clone したツリー(Docker #74 で確認)では区間ごと黙って飛ばしていた。
@@ -161,10 +171,7 @@ if [ -n "$M68K_SKIP" ]; then
 else
     echo "=== m68k-mega (m68ksim) ==="
     if make -C "$TIZIX/arch/m68k-mega" > "$LOGDIR/m68k_make.log" 2>&1; then
-        # 後半は z80 と共通のテスト(tzpaths が TIZIX_ARCH で m68ksim を起動する)
-        for t in test_args test_ls_format test_ps_m68k test_pwd_cd test_sh_hist \
-                 test_vfs_step8 test_vfs_step9 test_vfs_step10 test_5b_pipe \
-                 test_cmds_all test_dev_dd; do
+        for t in $FLAT32_TESTS; do
             printf '  %-16s ' "$t"
             if TIZIX_ARCH=m68k-mega timeout 400 python3 "$TIZIX/python/$t.py" m68k-mega \
                     > "$LOGDIR/m68k_$t.log" 2>&1; then
@@ -176,6 +183,40 @@ else
         done
     else
         echo "  make -C arch/m68k-mega が失敗($LOGDIR/m68k_make.log)"
+        rc=1
+    fi
+fi
+
+# esp32-wroom-32e(Espressif QEMU、-machine esp32。#108)。REGRESS_SKIP_ESP32=1 で省略できる。
+# m68k-mega と同じ PLAT_FLAT32 のポートなので、同じテストを回す。ツールチェインと QEMU は
+# PATH に要る(rocky9 では ~/bin)。無ければ理由を出して飛ばす。
+# ★QEMU は境界違反の 32bit アクセスも IRAM へのバイトアクセスも素通しする(実機は例外)。
+#   ここが通っても実機の保証にはならない(task.md #108)。
+ESP_SKIP=
+if [ -n "${REGRESS_SKIP_ESP32:-}" ]; then
+    ESP_SKIP="REGRESS_SKIP_ESP32 が立っている"
+elif ! command -v xtensa-esp32-elf-gcc > /dev/null 2>&1; then
+    ESP_SKIP="xtensa-esp32-elf-gcc が無い"
+elif ! command -v qemu-system-xtensa > /dev/null 2>&1; then
+    ESP_SKIP="qemu-system-xtensa が無い"
+fi
+if [ -n "$ESP_SKIP" ]; then
+    echo "=== esp32-wroom-32e (QEMU) === SKIP: $ESP_SKIP"
+else
+    echo "=== esp32-wroom-32e (QEMU) ==="
+    if make -C "$TIZIX/arch/esp32-wroom-32e" > "$LOGDIR/esp32_make.log" 2>&1; then
+        for t in $FLAT32_TESTS test_esp32d test_multislot; do
+            printf '  %-16s ' "$t"
+            if TIZIX_ARCH=esp32-wroom-32e timeout 400 python3 "$TIZIX/python/$t.py" esp32-wroom-32e \
+                    > "$LOGDIR/esp32_$t.log" 2>&1; then
+                echo "PASS"
+            else
+                echo "FAIL  ($LOGDIR/esp32_$t.log)"
+                rc=1
+            fi
+        done
+    else
+        echo "  make -C arch/esp32-wroom-32e が失敗($LOGDIR/esp32_make.log)"
         rc=1
     fi
 fi

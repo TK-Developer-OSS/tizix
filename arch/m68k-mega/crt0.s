@@ -108,7 +108,7 @@ trap1_handler:
 /* ---- TRAP #0: kexec 用システムコール ----
  *   ユーザーコマンド側(usyscall.s)の規約: D0=func(0=exit) / D1..D4=引数。
  *   戻り値は D0。0=exit だけは特別扱い(現コンテキストを保存せず破棄して
- *   スロットを解放、次を pick して復帰する)。それ以外は sys_call を呼んで
+ *   スロットを解放、次を pick して復帰する)。それ以外は sys_call(src/sysfile.c)を呼んで
  *   結果を D0 に載せ、同じコンテキストへ戻る(コンテキストスイッチ無し)。
  *
  *   #47 バグ修正: TRAP 命令は(autovector 割込みと違い)SR の割込みマスクを
@@ -124,6 +124,7 @@ trap0_handler:
     ori.w   #0x0700, %sr
     tst.l   %d0
     bne     tr_normal
+    move.l  %d1, -(%sp)        /* 終了コード(#111)。SP はこのあと次のプロセスのものに替わる */
     jsr     sched_exit_sp
     move.l  %d0, %sp
     movem.l (%sp)+, %d0-%d7/%a0-%a6
@@ -135,7 +136,7 @@ tr_normal:
     move.l  %d2, -(%sp)
     move.l  %d1, -(%sp)
     move.l  %d0, -(%sp)
-    jsr     m68k_sys_call
+    jsr     sys_call
     add.l   #20, %sp
     move.l  %d0, (%sp)
     movem.l (%sp)+, %d0-%d7/%a0-%a6

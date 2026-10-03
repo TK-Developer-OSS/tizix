@@ -44,6 +44,31 @@ if ARCH == "m68k-mega":
     CPMSIM_CMD = ["./m68ksim", "../../build/arch/m68k-mega/obj/kernel.bin", "../../build/arch/m68k-mega/obj/disk.img"]
     DRIVEB_SIZE = None
 
+# esp32-wroom-32e: Espressif QEMU(-machine esp32)。flash 像 1 本にカーネルと FAT が
+#   入っている(QEMU はこのファイルへ書き戻すので、m68k の disk.img と同じく状態が残る)。
+#   stdio の chardev を UART0 に直結する(-nographic の mux を通さないので、XMODEM の
+#   SOH = 0x01 が QEMU のエスケープ Ctrl-A に食われない)。
+#   ★signal=off が要る。既定(signal=on)だと QEMU は端末の ISIG を残すので、pty へ
+#     書いた Ctrl+C(0x03)を tty 層が食って入力キューごと捨て、ゲストに届かない
+#     (test_sh_hist の「↑×20 → ^C」が効かず、次の検査が 1 段ずれて落ちた)。
+if ARCH == "esp32-wroom-32e":
+    DRIVEB = os.path.join(TIZIX, "build", "arch", ARCH, "obj", "flash.bin")
+    CPMSIM_CMD = ["qemu-system-xtensa", "-display", "none", "-machine", "esp32",
+                  "-drive", "file=../../build/arch/esp32-wroom-32e/obj/flash.bin,if=mtd,format=raw",
+                  "-chardev", "stdio,id=con,signal=off", "-serial", "chardev:con",
+                  "-monitor", "none"]
+    DRIVEB_SIZE = None
+
+# 実機(TIZIX_HW=<TCP ポート>): シミュレータの代わりに python/hwrelay.py を起動する。
+#   hwrelay はそのポートで待ち受け、実機のシリアルを握っている中継(Windows なら
+#   arch/<arch>/tools/hwbridge.ps1)がつないで来たら、標準入出力とソケットを素通しする。
+#   中継はつながるたびに実機をリセットするので、テストから見ると「起動したての
+#   シミュレータ」と同じに見える。ディスクは実機のフラッシュ / SD のまま(テストの
+#   前に一度書いておく)。DRIVEB は待ち合わせに使うだけなので、ビルドした像のまま。
+HW_PORT = os.environ.get("TIZIX_HW")
+if HW_PORT:
+    CPMSIM_CMD = ["python3", os.path.join(TIZIX, "python", "hwrelay.py"), HW_PORT]
+
 
 def wait_disk_ready(path=DRIVEB, want_size=DRIVEB_SIZE, timeout=30.0):
     """FAT ディスクイメージの書き込みが落ち着くまでブロックする。

@@ -25,6 +25,7 @@ typedef struct {
     const char *src;   /* 戻り先の読み取り位置       */
     int line;          /* 戻り先の行番号             */
     char *buf;         /* 戻り先が使っていたバッファ  */
+    int cond;          /* 入ったときの条件ブロックの深さ(閉じ忘れの検出用) */
 } IncFrame;
 
 static IncFrame inc_stack[MAX_INCLUDE_DEPTH];
@@ -55,8 +56,203 @@ void lexer_define_macro(const char *name, const char *body) {
     macro_n++;
 }
 
+/* lexer_init が先頭に入れる組み込み定数(NULL / EOF / SEEK_*)の個数。
+ * これらは #ifdef / #ifndef / defined() からは「未定義」に見せる ──
+ * ヘッダが `#ifndef NULL` … `#define NULL ((void *)0)` と自前の定義を持つとき、
+ * そちらを採用するため(条件コンパイルに対応する前からの挙動を変えない)。 */
+static int macro_weak_n = 0;
+
+static int macro_is_defined(const char *name) {
+    for (int i = macro_n - 1; i >= macro_weak_n; i--)
+        if (strcmp(macro_name[i], name) == 0) return 1;
+    return 0;
+}
+
+static void macro_undef(const char *name) {
+    for (int i = 0; i < macro_n; i++)
+        if (strcmp(macro_name[i], name) == 0) macro_name[i][0] = '\0';
+}
+
 static char source_dir[512] = "";
 static int lexer_had_error = 0;
+
+/* ------------------------------------------------------------------ */
+/* 条件コンパイル: #ifdef / #ifndef / #if / #elif / #else / #endif       */
+/*   tizix の共有ソース(user/ 以下)を、他のコンパイラ(gcc / SDCC)と 1 本で    */
+/*   持つための最小限の実装。採用しない枝は字句解析せず、行単位で読み飛ばす。 */
+/*   tzcc 自身は __TZCC__ を定義済みにする(lexer_init)。                  */
+/* ------------------------------------------------------------------ */
+static int cond_depth = 0;      /* いま中に居る(採用した)条件ブロックの深さ */
+
+static void skip_line(void) {   /* 行末まで進む(改行文字は残す) */
+    while (*src && *src != '\n') src++;
+}
+
+static void cond_ws(void) {
+    while (*src == ' ' || *src == '\t') src++;
+}
+
+static int cond_name(char *nm, int max) {
+    int n = 0;
+    while ((isalnum((unsigned char)*src) || *src == '_') && n < max - 1) nm[n++] = *src++;
+    nm[n] = '\0';
+    return n;
+}
+
+/* #if の式(行の中だけを読む)。
+ *   式 := 積 { "||" 積 }
+ *   積 := 比較 { "&&" 比較 }
+ *   比較 := 値 [ ("==" | "!=" | "<" | "<=" | ">" | ">=") 値 ]
+ *   値 := 数値 | defined(名前) | defined 名前 | 名前 | "!" 値 | "(" 式 ")"
+ *   名前は #define された数値ならその値、それ以外(未定義を含む)は 0。 */
+static long cond_or(void);
+
+static long cond_value(void) {
+    char nm[128];
+    cond_ws();
+    if (*src == '!' && src[1] != '=') {
+        src++;
+        return !cond_value();
+    }
+    if (*src == '(') {
+        long v;
+        src++;
+        v = cond_or();
+        cond_ws();
+        if (*src == ')') src++;
+        return v;
+    }
+    if (isdigit((unsigned char)*src)) {
+        char *end;
+        long v = strtol(src, &end, 0);
+        src = end;
+        while (*src == 'u' || *src == 'U' || *src == 'l' || *src == 'L') src++;
+        return v;
+    }
+    if (cond_name(nm, sizeof(nm)) > 0) {
+        const char *mb;
+        if (strcmp(nm, "defined") == 0) {
+            int paren = 0;
+            cond_ws();
+            if (*src == '(') { paren = 1; src++; cond_ws(); }
+            cond_name(nm, sizeof(nm));
+            cond_ws();
+            if (paren && *src == ')') src++;
+            return macro_is_defined(nm);
+        }
+        mb = macro_lookup(nm);
+        if (!mb) return 0;
+        while (*mb == '(' || *mb == ' ') mb++;      /* `#define X (3)` の括弧 */
+        return strtol(mb, NULL, 0);
+    }
+    fprintf(stderr, "error: line %d: cannot parse #if expression\n", line);
+    lexer_had_error = 1;
+    skip_line();
+    return 0;
+}
+
+static long cond_cmp(void) {
+    long a = cond_value();
+    cond_ws();
+    if (src[0] == '=' && src[1] == '=') { src += 2; return a == cond_value(); }
+    if (src[0] == '!' && src[1] == '=') { src += 2; return a != cond_value(); }
+    if (src[0] == '<' && src[1] == '=') { src += 2; return a <= cond_value(); }
+    if (src[0] == '>' && src[1] == '=') { src += 2; return a >= cond_value(); }
+    if (src[0] == '<') { src++; return a < cond_value(); }
+    if (src[0] == '>') { src++; return a > cond_value(); }
+    return a;
+}
+
+static long cond_and(void) {
+    long a = cond_cmp();
+    for (;;) {
+        long b;
+        cond_ws();
+        if (!(src[0] == '&' && src[1] == '&')) return a;
+        src += 2;
+        b = cond_cmp();
+        a = (a && b);
+    }
+}
+
+static long cond_or(void) {
+    long a = cond_and();
+    for (;;) {
+        long b;
+        cond_ws();
+        if (!(src[0] == '|' && src[1] == '|')) return a;
+        src += 2;
+        b = cond_and();
+        a = (a || b);
+    }
+}
+
+/* 採用しない枝を読み飛ばす。入れ子の #if 系は数えて対応を取る。
+ *   want_else が非 0 なら、同じ深さの #else か、真になった #elif で止まって 1 を返す
+ *   (以後その枝を読む)。対応する #endif まで来たら 0 を返す。
+ *   コメントと文字列の中の # は指示子として見ない。 */
+static int cond_skip(int want_else) {
+    int nest = 0;
+    int start = line;
+    for (;;) {
+        while (*src == ' ' || *src == '\t' || *src == '\r') src++;
+        if (!*src) {
+            fprintf(stderr, "error: line %d: unterminated #if / #ifdef\n", start);
+            lexer_had_error = 1;
+            return 0;
+        }
+        if (*src == '#') {
+            char d[16];
+            int di = 0;
+            src++;
+            while (*src == ' ' || *src == '\t') src++;
+            while (isalpha((unsigned char)*src) && di < 15) d[di++] = *src++;
+            d[di] = '\0';
+            if (strcmp(d, "if") == 0 || strcmp(d, "ifdef") == 0 || strcmp(d, "ifndef") == 0) {
+                nest++;
+            } else if (strcmp(d, "endif") == 0) {
+                if (nest == 0) { skip_line(); return 0; }
+                nest--;
+            } else if (nest == 0 && want_else) {
+                if (strcmp(d, "else") == 0) { skip_line(); return 1; }
+                if (strcmp(d, "elif") == 0) {
+                    long v = cond_or();
+                    skip_line();
+                    if (v) return 1;
+                }
+            }
+        }
+        /* 行末まで。コメントと文字列は中身ごと飛ばす */
+        while (*src && *src != '\n') {
+            if (src[0] == '/' && src[1] == '/') { skip_line(); break; }
+            if (src[0] == '/' && src[1] == '*') {
+                src += 2;
+                while (*src && !(src[0] == '*' && src[1] == '/')) {
+                    if (*src == '\n') line++;
+                    src++;
+                }
+                if (*src) src += 2;
+                continue;
+            }
+            if (*src == '"' || *src == '\'') {
+                char q = *src++;
+                while (*src && *src != q && *src != '\n') {
+                    if (*src == '\\' && src[1] && src[1] != '\n') src++;
+                    src++;
+                }
+                if (*src == q) src++;
+                continue;
+            }
+            src++;
+        }
+        if (*src == '\n') { line++; src++; }
+    }
+}
+
+/* #if 系の 1 行を読み終えたところで呼ぶ。on = その枝を採用するか。 */
+static void cond_open(int on) {
+    if (on || cond_skip(1)) cond_depth++;
+}
 
 void lexer_set_source_dir(const char *dir) {
     if (!dir) { source_dir[0] = '\0'; return; }
@@ -80,6 +276,10 @@ void lexer_init(const char *source) {
     lexer_define_macro("SEEK_SET", "0");
     lexer_define_macro("SEEK_CUR", "1");
     lexer_define_macro("SEEK_END", "2");
+    macro_weak_n = macro_n;             /* ここまでは #ifdef から見えない(上の注記) */
+    // コンパイラの識別。共有ソースが `#ifdef __TZCC__` で枝を選べるように。
+    lexer_define_macro("__TZCC__", "1");
+    cond_depth = 0;
 }
 
 char lexer_get_last_error_char() {
@@ -171,6 +371,7 @@ static void do_include_directive(void) {
     inc_stack[inc_sp].src = src;
     inc_stack[inc_sp].line = line;
     inc_stack[inc_sp].buf = cur_buf;
+    inc_stack[inc_sp].cond = cond_depth;
     inc_sp++;
     cur_buf = buf;
     src = buf;
@@ -195,10 +396,21 @@ Token *lexer_next_token() {
             if (inc_sp > 0) {
                 if (cur_buf) free(cur_buf);
                 inc_sp--;
+                /* #if を閉じないままファイル(またはマクロ本体)が終わった */
+                if (cond_depth != inc_stack[inc_sp].cond) {
+                    fprintf(stderr, "error: #if / #ifdef without #endif at end of included file\n");
+                    lexer_had_error = 1;
+                    cond_depth = inc_stack[inc_sp].cond;
+                }
                 src     = inc_stack[inc_sp].src;
                 line    = inc_stack[inc_sp].line;
                 cur_buf = inc_stack[inc_sp].buf;
                 continue;
+            }
+            if (cond_depth != 0) {
+                fprintf(stderr, "error: #if / #ifdef without #endif at end of file\n");
+                lexer_had_error = 1;
+                cond_depth = 0;
             }
             tk->line = line;
             tk->type = TOKEN_EOF;
@@ -256,8 +468,50 @@ Token *lexer_next_token() {
                     }
                     while (*src && *src != '\n') src++;
                 }
+            } else if (strcmp(d, "ifdef") == 0 || strcmp(d, "ifndef") == 0) {
+                char nm[128];
+                int on;
+                cond_ws();
+                cond_name(nm, sizeof(nm));
+                on = macro_is_defined(nm);
+                if (d[2] == 'n') on = !on;
+                skip_line();
+                cond_open(on);
+            } else if (strcmp(d, "if") == 0) {
+                int on = (cond_or() != 0);
+                skip_line();
+                cond_open(on);
+            } else if (strcmp(d, "else") == 0 || strcmp(d, "elif") == 0) {
+                /* ここへ来るのは採用した枝を読み終えたとき。残りの枝は #endif まで捨てる */
+                skip_line();
+                if (cond_depth > 0) {
+                    cond_skip(0);
+                    cond_depth--;
+                } else {
+                    fprintf(stderr, "error: line %d: #%s without #if\n", line, d);
+                    lexer_had_error = 1;
+                }
+            } else if (strcmp(d, "endif") == 0) {
+                skip_line();
+                if (cond_depth > 0) {
+                    cond_depth--;
+                } else {
+                    fprintf(stderr, "error: line %d: #endif without #if\n", line);
+                    lexer_had_error = 1;
+                }
+            } else if (strcmp(d, "undef") == 0) {
+                char nm[128];
+                cond_ws();
+                if (cond_name(nm, sizeof(nm)) > 0) macro_undef(nm);
+                skip_line();
+            } else if (strcmp(d, "error") == 0) {
+                /* 採用した枝に #error があればビルドを止める(読み飛ばした枝のものは来ない) */
+                const char *msg = src;
+                skip_line();
+                fprintf(stderr, "error: line %d: #error%.*s\n", line, (int)(src - msg), msg);
+                lexer_had_error = 1;
             } else {
-                /* #ifndef / #pragma など未対応ディレクティブは行ごと無視 */
+                /* #pragma など未対応ディレクティブは行ごと無視 */
                 while (*src && *src != '\n') src++;
             }
             continue;
@@ -352,6 +606,7 @@ Token *lexer_next_token() {
                 inc_stack[inc_sp].src = src;
                 inc_stack[inc_sp].line = line;
                 inc_stack[inc_sp].buf = cur_buf;
+                inc_stack[inc_sp].cond = cond_depth;
                 inc_sp++;
                 cur_buf = my_strdup(mb);
                 src = cur_buf;

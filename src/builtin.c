@@ -71,20 +71,15 @@ static int cmd_tree(const char *arg)
  *   pid_tbl[n]=n(kexec.c)なので PID 列はブロック番号に一致(block0 のみ 1)。
  *   状態: run=現走行 / rdy=runnable 待ち。
  *   CMD/ARGS 列は kmem.h KW_CMDNAME/KW_CMDARGS(中央表)を直に覗く。 */
-/* #61: スロット数はアーキで違う。m68k-mega は src/kmem.h の M68K_NSLOT が
- * 唯一の定義場所(現在 62 = slot0 + 外部 61)。ここを 8 固定にしていたため、
- * スロット 8 以降で走っているプロセスが ps に出てこなかった。 */
-/* #78: 表示は z80 と m68k-mega で 1 本。違うのは走査範囲だけで、
- *   z80 は block1 が DRIVER(名前枠なし)なので 2 から、m68k は 1 から。
- *   名前表は両方とも kexec.c の ps_note が書く。x86-ia16 は表を持たないので
+/* #61: 枠の数はアーキで違う。ここで数を決め打ちしない ── 以前 8 固定にしていて、
+ * m68k-mega でスロット 8 以降のプロセスが ps に出てこなかった。 */
+/* #78: 表示は全アーキで 1 本。違うのは走査範囲だけで、src/kmem.h の
+ *   PROC_BLOCK_MIN..PROC_BLOCK_MAX(プロセス枠の番号範囲)をそのまま使う:
+ *   z80 は block1 が DRIVER(名前枠なし)なので 2..7、PLAT_FLAT32 は 1..スロット数-1。
+ *   名前表はどちらも kexec.c の ps_note が書く。x86-ia16 は表を持たないので
  *   旧来の BLK ST 表示のまま(#77 で当面リリース外)。 */
-#if defined(ARCH_M68K_MEGA)
-#define PS_FIRST   1
-#define PS_NSLOT   M68K_NSLOT
-#else
-#define PS_FIRST   2
-#define PS_NSLOT   8
-#endif
+#define PS_FIRST   PROC_BLOCK_MIN
+#define PS_NSLOT   (PROC_BLOCK_MAX + 1)
 static int cmd_ps(const char *arg)
 {
     unsigned char n;
@@ -94,7 +89,7 @@ static int cmd_ps(const char *arg)
     /* slot 0 はカーネル + init(z80 / m68k とも sh は外部プロセスで、自分の行に出る)。 */
     kprintf("0 %s (init)\n", (KCURRENT == 0) ? "run" : "rdy");
     for (n = PS_FIRST; n < PS_NSLOT; n++) {
-        /* PID_CONT は z80 の継続ブロック(m68k では立たない)。 */
+        /* PID_CONT は複数ブロック / スロットのプロセスの続き(z80、PLAT_FLAT32 は #113 から)。 */
         if (PIDTBL[n] == 0 || PIDTBL[n] == PID_CONT) continue;  /* free/継続block */
         kprintf("%u %s %s %s\n", (unsigned int)n,
                (n == KCURRENT) ? "run" : "rdy",
@@ -117,14 +112,16 @@ static int cmd_ps(const char *arg)
  *   次の tick でスケジューラが pick しなくなり消える。文脈/メモリは破棄。
  *   外部プロセスは FAT/fd を持たない(当面)ので資源後始末は不要。
  *   z80: block0(sh)/block1(DRIVER)は対象外 → block2..7。
- *   x86: slot0=kernel/idle のみ対象外 → slot1..7(DRIVER 枠が無い)。 */
-#if defined(ARCH_M68K_MEGA)
-#define KILL_MIN   1
-#define KILL_MAX   (M68K_NSLOT - 1)      /* src/kmem.h が唯一の定義場所 */
-#elif defined(ARCH_X86_IA16)
+ *   x86: slot0=kernel/idle のみ対象外 → slot1..7(DRIVER 枠が無い)。
+ *   PLAT_FLAT32: slot0 のみ対象外 → 1..スロット数-1。枠数が arch の plat.h 次第で
+ *   変わるので、usage の範囲は文字列に焼かず数値で出す(KILL_RANGE を定義しない)。 */
+#if defined(ARCH_X86_IA16)
 #define KILL_MIN   1
 #define KILL_MAX   7
 #define KILL_RANGE "1..7"
+#elif defined(PLAT_FLAT32)
+#define KILL_MIN   PROC_BLOCK_MIN
+#define KILL_MAX   PROC_BLOCK_MAX
 #else
 #define KILL_MIN   2
 #define KILL_MAX   7
@@ -136,12 +133,10 @@ static int cmd_kill(const char *arg)
 
     while (*arg == ' ') arg++;
     if (*arg < '0' || *arg > '9') {
-#if defined(ARCH_M68K_MEGA)
-        /* m68k は枠数が多く、しかも kmem.h の M68K_NSLOT 次第で変わるので、
-         * 文字列リテラルに焼かず数値で出す。 */
-        kprintf("usage: kill <1..%u>\n", (unsigned int)KILL_MAX);
-#else
+#ifdef KILL_RANGE
         kprintf("usage: kill <" KILL_RANGE ">\n");   /* #59: ROM 節約で短縮 */
+#else
+        kprintf("usage: kill <1..%u>\n", (unsigned int)KILL_MAX);
 #endif
         return BUILTIN_OK;
     }
@@ -157,7 +152,16 @@ static int cmd_kill(const char *arg)
         kprintf("%u not running\n", (unsigned int)n);
         return BUILTIN_OK;
     }
+#if defined(PLAT_FLAT32)
+    if (PIDTBL[n] == PID_CONT) {   /* 複数スロットのプロセスの続き。先頭の番号で kill する(#113) */
+        kprintf("%u not running\n", (unsigned int)n);
+        return BUILTIN_OK;
+    }
+    ((volatile unsigned char *)KW_EXITCODE)[n] = 130;   /* 止められた(#111) */
+    proc_release(n);               /* 続きのスロット(PID_CONT)も解放する */
+#else
     PIDTBL[n] = 0;                 /* 単一バイト store は atomic。di 不要 */
+#endif
     kprintf("killed %u\n", (unsigned int)n);
     return BUILTIN_OK;
 }
@@ -179,7 +183,7 @@ void builtin_init(void)
     if (fat_init() == 0) {                     /* FR_OK */
         kprintf("FAT Drive DETECTED\n");
     } else {
-#if defined(ARCH_X86_IA16) || defined(ARCH_M68K_MEGA)
+#if defined(ARCH_X86_IA16) || defined(PLAT_FLAT32)
         /* x86: マウント失敗でもプロンプトは出す(デバッグ継続用)。 */
         kprintf("FAT Drive FAILED (continuing)\n");
 #else
@@ -191,8 +195,8 @@ void builtin_init(void)
 
     vfs_init();          /* VFS 名前空間を KW_VTREE に初期化(/, /dev, ...) */
 
-#if defined(ARCH_X86_IA16) || defined(ARCH_M68K_MEGA)
-    /* x86 に常駐 DRIVER の概念は無い(コマンドは int 0x80 で直接カーネルへ)。 */
+#if defined(ARCH_X86_IA16) || defined(PLAT_FLAT32)
+    /* 常駐 DRIVER の概念は無い(コマンドは syscall で直接カーネルへ)。 */
 #else
     /* DRIVER.BIN を block1(0x9000) へ常駐ロード。FAT マウント後に行う。
      * ユーザーコードは DRIVER 経由で出力する前提なので、プロンプト(#)が

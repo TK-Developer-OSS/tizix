@@ -14,14 +14,17 @@ SRC = ../../src
 # -O2 必須: ia16-gcc 6.3.0 は -Os/-O1/-Og だと近ポインタ引数を隣の 32bit 引数と
 #   融合して les(far ロード)を吐く。ff.c の move_window(FATFS*) が壊れ、
 #   fs アクセスがセグメント 0(低位 RAM)へ化ける。-O2 だけこのバグを回避。
+# -I$(SRC)/libc: freestanding の <string.h>。mem* / str* の実体(libc.o)も
+#   そこの libc.c を共用する(以前は同じ中身を arch 側に持っていた。m68k-mega /
+#   esp32-wroom-32e と共通。リンク順を変えないよう libc.o は AOBJ の同じ位置に残す)。
 CFLAGS = -mcmodel=tiny -ffreestanding -fno-pic -fno-stack-protector -O2 \
          -Wall -Wextra -Wno-unused-parameter \
-         -DARCH_X86_IA16 -I. -Iinclude -I$(SRC) -include plat.h
+         -DARCH_X86_IA16 -I. -I$(SRC) -I$(SRC)/libc -include plat.h
 OBJ = obj
 IMG = disk/floppy.img
 
 # arch 固有(console phys / storage 下位層 / ブート / syscall ディスパッチ /
-#   カーネルパイプ非対応の穴埋め stub / /dev/fda 実体)
+#   カーネルパイプ非対応の穴埋め stub / /dev/fda 実体)+ 共有の libc.o
 AOBJ = $(OBJ)/crt0.o $(OBJ)/kmain.o $(OBJ)/console.o $(OBJ)/libc.o \
        $(OBJ)/libgcc.o $(OBJ)/diskio.o $(OBJ)/bios13.o $(OBJ)/proc.o \
        $(OBJ)/sysfile.o $(OBJ)/pipestub.o $(OBJ)/dev_fda.o
@@ -61,6 +64,8 @@ $(OBJ)/%.o: %.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 $(OBJ)/%.o: $(SRC)/%.c | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
+$(OBJ)/%.o: $(SRC)/libc/%.c | $(OBJ)
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 # --- カーネル (フラットバイナリ, 0 起点) ---
 $(OBJ)/kernel.bin: $(KOBJ) link-kernel.ld
@@ -80,7 +85,7 @@ _layout.inc: $(OBJ)/kernel.bin
 #   コマンドはカーネルとは別プログラム。-ffreestanding -nostdlib、
 #   syscall は INT 80h(ulibc.c)。
 UCFLAGS = -mcmodel=tiny -ffreestanding -fno-pic -fno-stack-protector -O2 \
-          -Wall -Wextra -Iuser -Iinclude
+          -Wall -Wextra -Iuser -I$(SRC)/libc
 UCRT  = $(OBJ)/crt0cmd.o $(OBJ)/argv_init.o
 ULIB  = $(OBJ)/ulibc.o $(OBJ)/usyscall.o
 

@@ -58,6 +58,13 @@ $(OBJDIR)/%.rel: %.c | $(OBJDIR)
 $(OBJDIR)/%.rel: %.s | $(OBJDIR)
 	$(AS) $(ASFLAGS) -o $@ $<
 
+# crt0.s は ../common-z80/ の断片(宣言と定数 / RAM とスケジューラ表の初期化 /
+# スケジューラ本体と _kexit / エリア順と gsinit)を .include する。z80pack と
+# z80board で同じだった部分を 1 か所に寄せたもの。sdasz80 は -D を持たないが
+# .include と .if / .ifdef は使える(下の sdcc -MM のような依存の自動生成は無いので、
+# ここで明示する)。
+$(OBJDIR)/crt0.rel: $(wildcard ../common-z80/*.inc)
+
 $(OBJDIR)/ivthelpers.rel: $(SRCDIR)/ivthelpers.c | $(OBJDIR)
 	$(CC) $(MZ80) --reserve-regs-iy -c --sdcccall 0 --opt-code-size -o $@ $<
 
@@ -68,7 +75,7 @@ $(OBJDIR)/ivthelpers.rel: $(SRCDIR)/ivthelpers.c | $(OBJDIR)
 #   入った ── z80board 実機ブリングアップで実害)。
 #   .c ごとに $(OBJDIR)/<name>.d を作り、`<rel> <d>: <c> <全ヘッダ>` を持たせる。
 #   .d 自身もヘッダに依存させるので、#include を増やせば次回に追従する。
-#   アセンブラ(.s)は #include を使わないので対象外。
+#   アセンブラ(.s)は対象外(crt0.s の .include だけは上で手書きしている)。
 DEP_CFLAGS = $(filter-out -c,$(CFLAGS))
 KDEPS = $(foreach r,$(KOBJ) io.rel ivthelpers.rel,\
           $(if $(wildcard $(SRCDIR)/$(r:.rel=.c) $(r:.rel=.c)),$(OBJDIR)/$(r:.rel=.d)))

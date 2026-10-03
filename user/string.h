@@ -1,12 +1,19 @@
 /* user/string.h - tizix ユーザーコマンド用 string.h
  *
- *   実体は string.c → string.rel。コマンドが自プロセス内へリンクして使う。
+ *   SDCC(z80): 実体は lstr.s → string.rel。コマンドが自プロセス内へリンクして使う。
  *   (旧版は driver.c 常駐関数を drv_tbl[] 経由で叩くマクロ群だった。driver 4KB 超過
  *    対策として純粋関数をコマンド側へ移設し、通常のプロトタイプ宣言に戻した。)
  *   ABI は全域 --sdcccall 0 に統一。
+ *
+ *   gcc(m68k-mega / esp32-wroom-32e): str* は stdio.h の gcc 側が static 関数で
+ *   全部持っているので、ここで宣言するものは無い。
+ *
+ *   tzcc はこのファイルを読まない(tzcc/include/string.h を横に置く)。
  */
 #ifndef _STRING_H
 #define _STRING_H
+
+#if defined(__SDCC)
 
 #ifndef _SIZE_T_DEFINED
 #define _SIZE_T_DEFINED
@@ -29,5 +36,7 @@ char  *strstr(const char *haystack, const char *needle) __sdcccall(0);
 void  *memset(void *s, int c, size_t n) __sdcccall(0);
 void  *memcpy(void *dest, const void *src, size_t n) __sdcccall(0);
 int    memcmp(const void *s1, const void *s2, size_t n) __sdcccall(0);
+
+#endif /* __SDCC */
 
 #endif
