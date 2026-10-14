@@ -31,6 +31,7 @@ BLK ST CMD ARGS
 - **Files.** FAT (via FatFs) with a small VFS on top, plus a `/dev` with `null`, `fda` and `fdb`. You can read and write the raw disks with `dd`.
 - **Commands.** Everything lives in `/bin`: `ls cat cp mv rm mkdir rmdir touch echo head tail wc grep sed uniq tee du dd date sleep vi rx telnet tzftp ntpdate rsyslog` and more. `vi` squeezes into three 4KB blocks thanks to overlays. `rx` pulls files in over XMODEM — handy for updating a board's SD card without pulling it out.
 - **Networking** (z80pack). Start the `net &` daemon and `telnet` / `tzftp` can talk to TCP hosts through the simulator's socket extension.
+- **ESP32** (`esp32-wroom-32e`). A single ESP32 runs the same kernel and commands off its own flash: built-in WiFi (DHCP, TCP, TLS, NTP), an MCP server (`mcpd`, so an AI client such as Claude Code can drive the board; see [doc/mcp.md](doc/mcp.md)), and commands for the chip's peripherals (`esp32-gpio`, I2C, SPI, ADC, PWM, RGB LED) through the `esp32d` helper daemon.
 
 ## Where it runs
 
@@ -39,6 +40,7 @@ BLK ST CMD ARGS
 | `z80pack` | z80pack's cpmsim (Z80, 64KB, floppy) | The default. The regression suite runs here |
 | `z80board` | A homebrew Z80 board (32KB ROM + SD card, FT245 USB serial) | Works on the real board. The regression suite also runs on the z80boardsim simulator |
 | `m68k-mega` | A bare MC68000 with an Arduino Mega2560 driving its bus (1MB SRAM, SD card) | Works on the real board (shell, pipes, background jobs, XMODEM). Simulator: m68ksim |
+| `esp32-wroom-32e` | A single ESP32 (ESP32-WROOM-32E, Xtensa LX6, 4MB flash with a FAT16 disk in it) | Boots on the real board: shell, FAT, WiFi, MCP server, GPIO and friends. The regression suite runs on Espressif's QEMU (WiFi is real-hardware only) |
 | `z80-pc8801` | NEC PC-8801 (Z80, 5.25" floppy, text VRAM console) on the M88 emulator | Boots to the shell with the FAT disk, `vi` and the usual commands. Pipes are stubbed out for now (the kernel code area is tight). Not tried on real hardware. The regression suite (23 tests) runs on M88 under Wine |
 | `x86-ia16` | 16-bit x86 (qemu) | Has known bugs; not supported for now |
 
@@ -116,6 +118,7 @@ We develop on Rocky Linux 9.
 | `z80pack` | SDCC 4.5.0 (`sdcc`, `sdasz80`, `sdldz80`, `sdar`, `makebin`); tzcc gets built from `tzcc/` | `cpmsim` and `receive` from the z80pack fork | — |
 | `z80board` | SDCC 4.5.0 (same as above) | `z80boardsim` from the z80pack fork | a ROM writer (32KB kernel ROM), `dd` for the SD card image |
 | `m68k-mega` | m68k-elf binutils + gcc 8.3.0 (`m68k-elf-gcc`, `m68k-elf-ld`, `m68k-elf-objcopy`) | `m68ksim` (built from this tree; needs rocket68, see below) | the Arduino AVR toolchain (avr-gcc, avrdude) and Windows PowerShell for `arch/m68k-mega/arduino/`, `dd` for the SD card image |
+| `esp32-wroom-32e` | Espressif's `xtensa-esp32-elf-gcc` (crosstool-NG, GCC 16.1.0) and `esptool`. For WiFi you also need Espressif's WiFi binaries and lwIP 2.2.0 (not in this repo; without them it builds without WiFi) | Espressif's QEMU, `qemu-system-xtensa -machine esp32` (`make -C arch/esp32-wroom-32e run`, Ctrl-A x to quit) | `esptool` to write `flash.bin` (4MB: kernel image at 0x1000, disk at 0x100000) to the module |
 | `z80-pc8801` | SDCC 4.5.0 (same as above) | [M88](http://retropc.net/cisc/m88/) (a Windows PC-8801 emulator) under Wine + Xvfb, driven by `arch/z80-pc8801/tools/winerun.py`. The emulator and the PC-8801 ROM images aren't in this repo | — (not tried) |
 | `x86-ia16` (unsupported) | ia16-elf-gcc 6.3.0 + binutils | qemu-system-i386 | — |
 
@@ -158,13 +161,15 @@ Anything that touches real hardware (dd'ing an SD card, burning ROMs, flashing t
 make run                          # z80pack: boot in cpmsim
 make ARCH=z80board run            # z80board: boot in z80boardsim
 make ARCH=m68k-mega run           # m68k-mega: boot in m68ksim (Ctrl+] to quit)
+make ARCH=esp32-wroom-32e run     # esp32: boot in Espressif's QEMU (Ctrl-A x to quit)
 ```
 
 ## Testing
 
 ```sh
 sh python/run_regress.sh          # the regression suite: pty tests on z80pack (cpmsim), guards, tzcc runtime tests,
-                                  #   then the z80board (z80boardsim) and m68k-mega (m68ksim) sections
+                                  #   then the z80board (z80boardsim), m68k-mega (m68ksim) and esp32-wroom-32e (QEMU) sections
+                                  #   (REGRESS_SKIP_ESP32=1 skips the ESP32 one)
 sh python/run_regress.sh --clean  # start over with a fresh disk image
 TIZIX_ARCH=z80board python3 python/test_args.py   # most tests run on z80board too
 python3 python/test_args.py m68k-mega             # cross-target tests take the target as an argument
