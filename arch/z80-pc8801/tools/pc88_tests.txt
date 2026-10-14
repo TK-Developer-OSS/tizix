@@ -1,0 +1,25 @@
+# arch/z80-pc8801 の回帰(winerun.py tests)。1 行 = コマンド<TAB>出力に含まれるべき文字列
+# 期待文字列: 空 = 出力が無いこと / !文字列 = 含まれていないこと / それ以外 = 含まれること
+date	1970-01-01
+echo hello	hello
+echo a b c	a b c
+ls /	bin/
+cat /etc/rc	rsyslog boot-ok
+head /etc/rc	tizix startup
+tail /etc/rc	# net
+wc /etc/rc	/etc/rc
+whoami	root
+uptime	up
+df	free
+ps	(init)
+mkdir /root/dd	
+ls /root	DD/
+cp /etc/rc /root/rr	(54 bytes)
+cat /root/rr	boot-ok
+touch /root/tt	
+ls /root	TT
+rm /root/rr	
+ls /root	!RR
+echo 0123456789	0123456789
+echo a-b=c:d,e.f/g	a-b=c:d,e.f/g
+@vitest

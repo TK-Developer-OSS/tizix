@@ -29,6 +29,12 @@ CPMSIM_CWD = ARCH_DIR
 CPMSIM_CMD = ["./cpmsim", "-d", "disks"]
 DRIVEB_SIZE = 256256
 
+# z80-pc8801: 当面は cpmsim を流用(PC-8801 固有のハードは未実装の骨組み)。
+#   disks/*.dsk は raw(D88 は実機/エミュレータ用に別に出る)。
+#   ビルド系・カーネル・コマンドの回帰用で、PC-8801 ハードの検証にはならない。
+if ARCH == "z80-pc8801":
+    DRIVEB_SIZE = None
+
 # z80board(#71): z80boardsim は ROM 像ではなく kernel.ihx を -x で受け取り、
 #   SD カードは arch/z80board/sdcard.img(FAT)。TIZIX_ARCH=z80board で
 #   既存の pty テスト(test_vi 等)を実機相当の SD/SPI ドライバ経路で回せる。

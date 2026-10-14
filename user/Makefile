@@ -51,9 +51,11 @@ OBJ := ../build/arch/$(ARCH)/user
 #   意味論を変えずにこの分を作る。溢れたかどうかは driver.map の l__CODE が
 #   0x1000 以下かで判る(超えると **ビルドは通り、実行時に飛ぶ**ので要注意)。
 OPTOFF     := --nogcse --noinvariant --nolabelopt --noloopreverse --nooverlay
-CFLAGS_CMD := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src
+CFLAGS_CMD := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
+              $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=14 -DNO_HISTORY)
 CFLAGS_DRV := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
-              $(if $(filter z80board,$(ARCH)),-DARCH_Z80BOARD)
+              $(if $(filter z80board,$(ARCH)),-DARCH_Z80BOARD) \
+              $(if $(filter z80-pc8801,$(ARCH)),-DARCH_PC8801)
 LDBASE     := -b _CODE=0x0000
 
 # ---- 固定シンボル（すべてのコマンドで共通） ----

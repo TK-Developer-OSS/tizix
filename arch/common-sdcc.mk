@@ -33,7 +33,11 @@ ASFLAGS = $(PLAT_DEF_AS)
 # ---- リンク対象 ----
 #   sh.rel は z80 では外部コマンド化(user/sh.c → /bin/sh.bin)したのでカーネル
 #   像から外す(~2KB 減。NSEC=254 の天井対策)。
+ifeq ($(ARCH),z80-pc8801)
+KOBJ_BASE = crt0.rel init.rel kernel.rel builtin.rel kexec.rel ff.rel diskio.rel fatcmd.rel vfs.rel pipestub.rel dev.rel
+else
 KOBJ_BASE = crt0.rel init.rel kernel.rel builtin.rel kexec.rel ff.rel diskio.rel fatcmd.rel vfs.rel pipe.rel dev.rel
+endif
 KOBJ = $(KOBJ_BASE) $(KOBJ_ARCH)
 KRELS   = $(addprefix $(OBJDIR)/, $(KOBJ))
 IVT_REL = $(OBJDIR)/ivthelpers.rel

@@ -39,6 +39,7 @@ BLK ST CMD ARGS
 | `z80pack` | z80pack's cpmsim (Z80, 64KB, floppy) | The default. The regression suite runs here |
 | `z80board` | A homebrew Z80 board (32KB ROM + SD card, FT245 USB serial) | Works on the real board. The regression suite also runs on the z80boardsim simulator |
 | `m68k-mega` | A bare MC68000 with an Arduino Mega2560 driving its bus (1MB SRAM, SD card) | Works on the real board (shell, pipes, background jobs, XMODEM). Simulator: m68ksim |
+| `z80-pc8801` | NEC PC-8801 (Z80, 5.25" floppy, text VRAM console) on the M88 emulator | Boots to the shell with the FAT disk, `vi` and the usual commands. Pipes are stubbed out for now (the kernel code area is tight). Not tried on real hardware. The regression suite (23 tests) runs on M88 under Wine |
 | `x86-ia16` | 16-bit x86 (qemu) | Has known bugs; not supported for now |
 
 ## How it's put together
@@ -115,6 +116,7 @@ We develop on Rocky Linux 9.
 | `z80pack` | SDCC 4.5.0 (`sdcc`, `sdasz80`, `sdldz80`, `sdar`, `makebin`); tzcc gets built from `tzcc/` | `cpmsim` and `receive` from the z80pack fork | — |
 | `z80board` | SDCC 4.5.0 (same as above) | `z80boardsim` from the z80pack fork | a ROM writer (32KB kernel ROM), `dd` for the SD card image |
 | `m68k-mega` | m68k-elf binutils + gcc 8.3.0 (`m68k-elf-gcc`, `m68k-elf-ld`, `m68k-elf-objcopy`) | `m68ksim` (built from this tree; needs rocket68, see below) | the Arduino AVR toolchain (avr-gcc, avrdude) and Windows PowerShell for `arch/m68k-mega/arduino/`, `dd` for the SD card image |
+| `z80-pc8801` | SDCC 4.5.0 (same as above) | [M88](http://retropc.net/cisc/m88/) (a Windows PC-8801 emulator) under Wine + Xvfb, driven by `arch/z80-pc8801/tools/winerun.py`. The emulator and the PC-8801 ROM images aren't in this repo | — (not tried) |
 | `x86-ia16` (unsupported) | ia16-elf-gcc 6.3.0 + binutils | qemu-system-i386 | — |
 
 Two things you'll have to get yourself — they're not in this repo:
@@ -166,6 +168,15 @@ sh python/run_regress.sh          # the regression suite: pty tests on z80pack (
 sh python/run_regress.sh --clean  # start over with a fresh disk image
 TIZIX_ARCH=z80board python3 python/test_args.py   # most tests run on z80board too
 python3 python/test_args.py m68k-mega             # cross-target tests take the target as an argument
+```
+
+PC-8801 has its own harness (it needs `wine` and `xvfb`, plus `M88.exe` and the ROM images in `~/work/pc88`):
+
+```sh
+make ARCH=z80-pc8801
+cd arch/z80-pc8801/tools
+python3 -u winerun.py boot                    # boot tizix on M88 (about a minute)
+python3 -u winerun.py tests pc88_tests.txt    # RESULT: n / m PASS (23 / 23 at the moment)
 ```
 
 ## What's where

@@ -92,8 +92,19 @@ mc_bad:
 mc_next:
         inc     de
         ld      a, h
+        ; MEMCHK_TOP_H を arch の crt0.s が先に定義していれば、そこで検査を打ち切る
+        ; (それ以降のブロックは触らず PID_BAD で予約)。PC-8801 は 0xF000 以降が
+        ; テキスト VRAM とファームの変数なので 0xF0 を定義する。未定義なら従来どおり。
+        .ifdef  MEMCHK_TOP_H
+        cp      #MEMCHK_TOP_H
+        .else
         or      a                      ; block7 の後で HL は 0x0000 に一周する
+        .endif
         jr      nz, mc_blk
+        .ifdef  MEMCHK_TOP_H
+        ld      a, #PID_BAD
+        ld      (de), a                ; 打ち切った次のブロックを使わせない
+        .endif
 
         ; 0x851A..0x8544 を 0 クリア(43B)。RAM ゴミ対策。内訳:
         ;   KW_OUTROUTE[8] (0x851A) : out_route。ゴミが ROUTE_PIPE(2) だと

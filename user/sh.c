@@ -96,6 +96,7 @@ static unsigned char sh_break(void)
 /* ================================================================== */
 /* ヒストリ(#45)                                                      */
 /* ================================================================== */
+#ifndef NO_HISTORY
 /* /root/history に固定長スロットのリングで持つ。ファイル内容は動かさない。
  *   [0]                 hhead: 次に書くスロット番号 (0..HIST_N-1)
  *   [1]                 hcnt : 有効件数 (0..HIST_N)
@@ -178,6 +179,11 @@ static unsigned hist_get(struct sh_state *S, unsigned char back, char *buf)
     buf[LINE_MAX - 1] = 0;
     return (unsigned)strlen(buf);
 }
+#else   /* NO_HISTORY: PC-8801 は sh.bin を 2 ブロックに収めるため履歴を持たない */
+#define hist_init(S)        ((void)0)
+#define hist_add(S, l)      ((void)0)
+#define hist_get(S, b, u)   0
+#endif
 
 /* 画面上の入力を n 文字ぶん消す(BS と ↑↓ の差し替えで共用) */
 static void rubout(unsigned n)

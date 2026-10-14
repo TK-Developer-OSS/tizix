@@ -41,7 +41,9 @@
 #define YANK_MAX 96         /* dd / yy が持てる 1 行の上限(実寸に合わせて縮小)*/
 #define VI_STACK_RESERVE 1536  /* 追加ブロックの上端に残すスタック + argv 用の余白 */
 #define NAME_MAX 40        /* 8.3 + パスに十分。実寸に詰めてある */
+#ifndef TROWS
 #define TROWS    23         /* 本文の表示行数 */
+#endif
 #define TCOLS    79         /* 1 行に出す最大桁数 */
 
 /* getkey() が返す拡張キー。
