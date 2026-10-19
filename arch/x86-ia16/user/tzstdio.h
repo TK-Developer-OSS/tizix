@@ -28,6 +28,14 @@
 #ifndef _TZSTDIO_H
 #define _TZSTDIO_H
 
+#pragma GCC diagnostic ignored "-Wunused-function"
+
+#define TZ_SYSCALL 1
+
+#ifndef __sdcccall
+#define __sdcccall(x)
+#endif
+
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
@@ -41,8 +49,18 @@ typedef unsigned int size_t;
 
 extern int putchar(int c);      /* ulibc.o */
 extern int getchar(void);       /* ulibc.o */
-extern unsigned syscall5(unsigned func, unsigned al, unsigned bx,
-                         unsigned cx, unsigned si, unsigned di);
+extern unsigned _syscall5_asm(unsigned func, unsigned al, unsigned bx,
+                              unsigned cx, unsigned si, unsigned di) __asm__("syscall5");
+#define _GET_6TH_ARG(arg1, arg2, arg3, arg4, arg5, arg6, VAL, ...) VAL
+#define _SYSCALL5_CHOOSER(...) _GET_6TH_ARG(__VA_ARGS__, _6, _5, _4, _3, _2, _1)
+#define _syscall5_4(f, a, b, c) _syscall5_asm(f, (unsigned)(a), (unsigned)(b), (unsigned)(c), 0, 0)
+#define _syscall5_5(f, a, b, c, s) _syscall5_asm(f, (unsigned)(a), (unsigned)(b), (unsigned)(c), (unsigned)(s), 0)
+#define _syscall5_6(f, a, b, c, s, d) _syscall5_asm(f, (unsigned)(a), (unsigned)(b), (unsigned)(c), (unsigned)(s), (unsigned)(d))
+/* x86 の syscall は 16bit 戻り。0xFFFF(= -1 / 終端)は 32bit 側の 0xFFFFFFFF に伸ばす(/bin/free の slot 走査用)。 */
+static unsigned long _sc_ext(unsigned r) { return r == 0xFFFF ? 0xFFFFFFFFUL : (unsigned long)r; }
+#define syscall5(...) _sc_ext(_SYSCALL5_CHOOSER(__VA_ARGS__, _syscall5_6, _syscall5_5, _syscall5_4)(__VA_ARGS__))
+
+
 
 /* ---- puts/prs/prnum/prnuml(tzcc 互換。puts は改行を付ける) ---- */
 static int puts(const char *s)
@@ -67,12 +85,18 @@ static void prnum(unsigned v)
         while (i) putchar(b[--i]);
 }
 
-static void prnuml(unsigned long v)
+/* 32bit 表示。libgcc の除算を使わず(ユーザ側に無い)、10 のべきの引き算で桁を出す。 */
+static void __attribute__((unused)) prnuml(unsigned long v)
 {
-        char b[11];
-        int i = 0;
-        do { b[i++] = (char)('0' + (unsigned)(v % 10)); v /= 10; } while (v);
-        while (i) putchar(b[--i]);
+        static const unsigned long pw[] = {1000000000UL, 100000000UL, 10000000UL,
+                1000000UL, 100000UL, 10000UL, 1000UL, 100UL, 10UL};
+        int i, started = 0;
+        for (i = 0; i < 9; i++) {
+                char d = '0';
+                while (v >= pw[i]) { v -= pw[i]; d++; }
+                if (d != '0' || started) { putchar(d); started = 1; }
+        }
+        putchar((char)('0' + (unsigned)v));
 }
 
 /* printf: %s %d %u %c %x %% だけの簡易版(ulibc.c の実装と同等)。
@@ -129,7 +153,7 @@ static void klog(const char *msg)
         syscall5(18, 0, 0, 0, (unsigned)msg, 0);
 }
 #define TZ_NFILE 4
-typedef struct { int fd; int eof; int err; int used; } FILE;
+typedef struct { int fd; int eof; int err; int used; long pos; } FILE;
 static FILE tz_files[TZ_NFILE];
 
 static FILE *fopen(const char *path, const char *mode)
@@ -146,6 +170,7 @@ static FILE *fopen(const char *path, const char *mode)
                         tz_files[i].eof  = 0;
                         tz_files[i].err  = 0;
                         tz_files[i].used = 1;
+                        tz_files[i].pos  = 0;
                         return &tz_files[i];
                 }
         }
@@ -171,6 +196,7 @@ static int fgetc(FILE *f)
                 return EOF;
         n = (int)syscall5(6, 0, (unsigned)f->fd, 1, 0, (unsigned)&c);
         if (n <= 0) { f->eof = 1; return EOF; }
+        f->pos++;
         return c;
 }
 
@@ -182,7 +208,11 @@ static int fputc(int c, FILE *f)
         if (!f || !f->used)
                 return EOF;
         n = (int)syscall5(7, 0, (unsigned)f->fd, 1, 0, (unsigned)&ch);
-        return (n == 1) ? c : EOF;
+        if (n == 1) {
+                f->pos++;
+                return c;
+        }
+        return EOF;
 }
 
 static size_t fread(void *ptr, size_t size, size_t nmemb, FILE *f)
@@ -193,6 +223,7 @@ static size_t fread(void *ptr, size_t size, size_t nmemb, FILE *f)
                 return 0;
         want = (unsigned)(size * nmemb);
         got  = syscall5(6, 0, (unsigned)f->fd, want, 0, (unsigned)ptr);
+        f->pos += (long)got;
         if (got < want)
                 f->eof = 1;
         return got / size;
@@ -206,6 +237,7 @@ static size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *f)
                 return 0;
         want = (unsigned)(size * nmemb);
         got  = syscall5(7, 0, (unsigned)f->fd, want, 0, (unsigned)ptr);
+        f->pos += (long)got;
         return got / size;
 }
 
@@ -242,11 +274,29 @@ static int fflush(FILE *f) { (void)f; return 0; }
 
 /* x86 に seek syscall が無いので未対応。呼ぶと失敗を返す(呼び出し元が
  * これを前提に fopen し直す設計のコマンドなら壊れずに動く)。 */
-static long ftell(FILE *f) { (void)f; return -1L; }
+static long ftell(FILE *f)
+{
+        return (f && f->used) ? f->pos : -1L;
+}
 static int fseek(FILE *f, long off, int whence)
 {
-        (void)f; (void)off; (void)whence;
-        return -1;
+        unsigned r;
+        unsigned hi;
+        unsigned long pos32;
+
+        if (!f || !f->used)
+                return -1;
+
+        r = (unsigned)syscall5(13, (unsigned)whence, (unsigned)f->fd, (unsigned)(off & 0xFFFF), (unsigned)((off >> 16) & 0xFFFF), 0);
+        hi = (unsigned)syscall5(13, 3, 0, 0, 0, 0);
+
+        if (r == 0xFFFF && hi == 0xFFFF)
+                return -1;
+
+        pos32 = ((unsigned long)hi << 16) | (unsigned long)r;
+        f->pos = (long)pos32;
+        f->eof = 0;
+        return 0;
 }
 
 /* ---- ディレクトリ(tzcc 規約: 現在1個だけ開ける前提) ---- */
@@ -291,8 +341,14 @@ static int unlink(const char *path)
 {
         return (syscall5(11, 0, 0, 0, (unsigned)path, 0) == 0xFFFF) ? 1 : 0;
 }
-static int mkdir(const char *path)  { (void)path; return -1; }        /* 未対応 */
-static int rename(const char *a, const char *b) { (void)a; (void)b; return -1; }      /* 未対応 */
+static int mkdir(const char *path)
+{
+        return (int)syscall5(14, 0, 0, 0, (unsigned)path, 0);
+}
+static int rename(const char *a, const char *b)
+{
+        return (int)syscall5(15, 0, 0, 0, (unsigned)a, (unsigned)b);
+}
 
 /* ---- プロセス wait/wake・共有メモリ・オーバーレイ・追加ブロック ----
  * tizix 固有の高度機能。x86 側にまだ土台が無いので no-op/失敗スタブのみ。
@@ -307,7 +363,90 @@ static void poke(unsigned addr, unsigned char v) { (void)addr; (void)v; }
 static unsigned peekw(unsigned addr) { (void)addr; return 0; }
 static void pokew(unsigned addr, unsigned v) { (void)addr; (void)v; }
 static unsigned callovl(unsigned addr, unsigned arg) { (void)addr; (void)arg; return 0; }
-static unsigned getxbase(void) { return 0; }
-static unsigned getxsize(void) { return 0; }
+
+static unsigned getticks(void)
+{
+        return (unsigned)syscall5(3, 0, 0, 0, 0, 0);
+}
+
+static unsigned long time_get(void)
+{
+        return (unsigned long)syscall5(16, 0, 0, 0, 0, 0);
+}
+
+static unsigned char pipe_tail(unsigned want)
+{
+        /* syscall 21: writer 完了まで待って末尾 want 行を出力。戻り 1=処理した / 0=パイプ後段ではない */
+        return (unsigned char)syscall5(21, want > 255 ? 255 : want, 0, 0, 0, 0);
+}
+
+static void absmove(unsigned dst, unsigned src, unsigned n)
+{
+        unsigned char *d = (unsigned char *)dst;
+        unsigned char *s = (unsigned char *)src;
+        unsigned i;
+        for (i = 0; i < n; i++) d[i] = s[i];
+}
+static void absmovd(unsigned dst, unsigned src, unsigned n)
+{
+        unsigned char *d = (unsigned char *)dst;
+        unsigned char *s = (unsigned char *)src;
+        unsigned i = n;
+        while (i > 0) { i--; d[i] = s[i]; }
+}
+
+static unsigned absscan(unsigned p, unsigned ch, unsigned n)
+{
+        unsigned char *s = (unsigned char *)p;
+        unsigned i;
+        for (i = 0; i < n; i++)
+                if (s[i] == (unsigned char)ch) return p + i;
+        return p + n;
+}
+static unsigned absrscan(unsigned p, unsigned ch, unsigned n)
+{
+        unsigned char *s = (unsigned char *)(p - 1);
+        unsigned i;
+        for (i = 0; i < n; i++)
+                if (s[-(int)i] == (unsigned char)ch) return p - i;
+        return p - n;
+}
+
+#ifndef VI_XBUF_SIZE
+#define VI_XBUF_SIZE 8192
+#endif
+static char vi_xbuf[VI_XBUF_SIZE];
+static unsigned getxbase(void) { return (unsigned)vi_xbuf; }
+static unsigned getxsize(void) { return (unsigned)VI_XBUF_SIZE; }
+
+static unsigned input_ready(void)
+{
+        return (unsigned)syscall5(17, 0, 0, 0, 0, 0);
+}
+static int kbhit(void)
+{
+        return (int)input_ready();
+}
+static void con_raw(int on)
+{
+        syscall5(35, (unsigned long)on, 0, 0, 0, 0);
+}
+static int getc_timeout(unsigned wait_ticks)
+{
+        unsigned t0 = getticks();
+        for (;;) {
+                if (input_ready()) return getchar();
+                if ((unsigned)(getticks() - t0) >= wait_ticks) return -1;
+        }
+}
+
+#ifndef PROC_SLOT_KB
+#define PROC_SLOT_KB 64
+#endif
+
+static unsigned long kfs_df(unsigned sel)
+{
+        return (unsigned long)syscall5(19, (unsigned long)sel, 0, 0, 0, 0);
+}
 
 #endif

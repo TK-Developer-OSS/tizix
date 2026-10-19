@@ -34,6 +34,25 @@ _start:
 	cld
 	mov  [drive], dl
 
+	cmp  dl, 0x80
+	jb   chs_rd
+	/* HDD / USB メモリ / SD カード(BIOS からはドライブ 0x80 以降): INT 13h 拡張(LBA)で stage2 を読む */
+	mov  byte ptr [tries], 4
+lba_rd:
+	mov  si, offset dap
+	mov  ah, 0x42
+	mov  dl, [drive]
+	int  0x13
+	jnc  rd_ok
+	xor  ah, ah
+	mov  dl, [drive]
+	int  0x13               /* reset して再試行 */
+	dec  byte ptr [tries]
+	jnz  lba_rd
+	jmp  err
+chs_rd:
+	mov  byte ptr [tries], 4   /* 実機の FDD は一過性エラーがあるのでリトライ */
+rd:
 	mov  ax, STAGE2_SEG
 	mov  es, ax
 	xor  bx, bx
@@ -44,7 +63,14 @@ _start:
 	mov  dh, 0
 	mov  dl, [drive]
 	int  0x13
-	jc   err
+	jnc  rd_ok
+	xor  ah, ah
+	mov  dl, [drive]
+	int  0x13               /* reset して再試行 */
+	dec  byte ptr [tries]
+	jnz  rd
+	jmp  err
+rd_ok:
 
 	mov  dl, [drive]
 	ljmp STAGE2_SEG, 0x0000
@@ -62,6 +88,12 @@ err:
 	jmp  2b
 
 drive: .byte 0
+/* INT 13h 拡張の DAP: stage2(LBA STAGE2_LBA から STAGE2_SECS セクタ)を STAGE2_SEG:0 へ */
+dap:   .byte 0x10, 0
+       .word STAGE2_SECS
+       .word 0, STAGE2_SEG
+       .long STAGE2_LBA, 0
+tries: .byte 4
 msg:   .asciz "VBR: stage2 load error\r\n"
 
 	.space 510-(.-_start+0x3e), 0

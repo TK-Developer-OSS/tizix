@@ -1,0 +1,299 @@
+/* tizix x86-ia16 : COM1 16550 UART 物理層 & BIOS コンソール併用 (M1)
+ *   QEMU / 実機対応:
+ *   - con_init: 16550 の存在を検出 (scratch レジスタ COM1+7 に 0x5A/0xA5 を書いて読み戻す)。
+ *     無ければ serial_ok = 0 にして COM1 への出力/受信確認をスキップ。
+ *   - 出力: COM1 と BIOS 画面 (INT 10h AH=0Eh, BH=0, BL=7) の両方へ。
+ *   - 入力: COM1 受信と BIOS キーボード (INT 16h AH=01h/00h) の両方から。
+ *     特殊キー(上=48h→ESC [ A, 下=50h→B, 右=4Dh→C, 左=4Bh→D)に変換。
+ */
+#define COM1 0x3F8
+
+static int serial_ok = 0;
+
+/* 特殊キー変換用バッファ */
+static unsigned char kbd_buf[8];
+static int kbd_buf_len = 0;
+static int kbd_buf_idx = 0;
+
+static inline void outb(unsigned short port, unsigned char val)
+{
+	__asm__ volatile ("outb %%al, %%dx" : : "a"(val), "d"(port));
+}
+
+static inline unsigned char inb(unsigned short port)
+{
+	unsigned char r;
+	__asm__ volatile ("inb %%dx, %%al" : "=a"(r) : "d"(port));
+	return r;
+}
+
+static inline void io_delay(void)
+{
+	__asm__ volatile ("outb %%al, $0x80" : : "a"(0));
+}
+
+void con_init(void)
+{
+	/* 16550 存在検出: scratch レジスタ (COM1 + 7) にテスト値を書き込み読み戻す */
+	outb(COM1 + 7, 0x5A);
+	io_delay();
+	if (inb(COM1 + 7) == 0x5A) {
+		outb(COM1 + 7, 0xA5);
+		io_delay();
+		if (inb(COM1 + 7) == 0xA5) {
+			serial_ok = 1;
+		}
+	}
+
+	if (serial_ok) {
+		outb(COM1 + 1, 0x00);   /* 割り込み無効                        */
+		outb(COM1 + 3, 0x80);   /* DLAB=1                              */
+		outb(COM1 + 0, 0x01);   /* 分周比 lo = 1 -> 115200bps          */
+		outb(COM1 + 1, 0x00);   /* 分周比 hi = 0                       */
+		outb(COM1 + 3, 0x03);   /* 8N1, DLAB=0                         */
+		outb(COM1 + 2, 0xC7);   /* FIFO 有効・クリア・14byte 閾値      */
+		outb(COM1 + 4, 0x0B);   /* DTR|RTS|OUT2                        */
+	}
+
+	/* IRQ1(キーボード)は PIC でマスク: BIOS の INT 09h に取らせず、下の kb_poll が読む */
+	outb(0x21, (unsigned char)(inb(0x21) | 0x02));
+}
+
+/* 画面(VGA テキスト 80x25, B800:0000)へ直接書く。BIOS の INT 10h は使わない
+ * (BIOS が中で sti し、IF=0 のカーネル中に PIT が割り込んで _isr08 が
+ * syscall の途中で走りハングするため)。カーソルは CRTC(0x3D4/0x3D5)で更新。 */
+#define VCOLS 80
+#define VROWS 25
+static unsigned char vrow, vcol, vinit;
+
+static void vwrite(unsigned off, unsigned val)
+{
+	__asm__ volatile (
+		"push %%es\n\t"
+		"push %%ax\n\t"
+		"mov $0xB800, %%ax\n\t"
+		"mov %%ax, %%es\n\t"
+		"pop %%ax\n\t"
+		"mov %%ax, %%es:(%%bx)\n\t"
+		"pop %%es"
+		: : "a"(val), "b"(off) : "memory", "cc");
+}
+
+static unsigned vread(unsigned off)
+{
+	unsigned v;
+	__asm__ volatile (
+		"push %%es\n\t"
+		"mov $0xB800, %%ax\n\t"
+		"mov %%ax, %%es\n\t"
+		"mov %%es:(%%bx), %%ax\n\t"
+		"pop %%es"
+		: "=a"(v) : "b"(off) : "memory", "cc");
+	return v;
+}
+
+static void vscroll(void)
+{
+	unsigned i;
+	unsigned si_ = VCOLS * 2, di_ = 0, cx_ = (VROWS - 1) * VCOLS;
+	/* 1 行上へ: B800 内の rep movsw(DS/ES を一時的に B800 にする) */
+	__asm__ volatile (
+		"push %%ds\n\t"
+		"push %%es\n\t"
+		"mov $0xB800, %%ax\n\t"
+		"mov %%ax, %%ds\n\t"
+		"mov %%ax, %%es\n\t"
+		"cld\n\t"
+		"rep movsw\n\t"
+		"pop %%es\n\t"
+		"pop %%ds"
+		: "+S"(si_), "+D"(di_), "+c"(cx_)
+		: : "ax", "memory", "cc");
+	for (i = (VROWS - 1) * VCOLS; i < VROWS * VCOLS; i++)
+		vwrite(i * 2, 0x0720);
+}
+
+static void vcursor(void)
+{
+	unsigned pos = (unsigned)vrow * VCOLS + vcol;
+	outb(0x3D4, 0x0F); outb(0x3D5, (unsigned char)(pos & 0xFF));
+	outb(0x3D4, 0x0E); outb(0x3D5, (unsigned char)(pos >> 8));
+}
+
+static void vga_putc(unsigned char c)
+{
+	unsigned i;
+
+	if (!vinit) {                       /* 初回: 画面を消して左上から */
+		for (i = 0; i < VROWS * VCOLS; i++)
+			vwrite(i * 2, 0x0720);
+		vrow = 0; vcol = 0; vinit = 1;
+	}
+	if (c == '\r') {
+		vcol = 0;
+	} else if (c == '\n') {
+		vrow++;
+	} else if (c == '\b') {
+		if (vcol) vcol--;
+	} else if (c == '\t') {
+		vcol = (unsigned char)((vcol + 8) & ~7);
+	} else if (c >= 0x20) {
+		vwrite(((unsigned)vrow * VCOLS + vcol) * 2, 0x0700 | c);
+		vcol++;
+	}
+	if (vcol >= VCOLS) { vcol = 0; vrow++; }
+	if (vrow >= VROWS) { vscroll(); vrow = VROWS - 1; }
+	vcursor();
+}
+
+void con_putc(char c)
+{
+	vga_putc((unsigned char)c);
+
+	/* COM1 出力 (serial_ok のみ) */
+	if (serial_ok) {
+		while (!(inb(COM1 + 5) & 0x20))   /* LSR THRE 待ち */
+			;
+		outb(COM1, (unsigned char)c);
+	}
+}
+
+/* キーボード: BIOS(INT 16h / BDA)には頼らず、8042(ポート 0x60/0x64)を直接ポーリングして
+ * スキャンコード(セット 1)を変換する。理由: (1) INT 16h は中で sti するので IF=0 の
+ * カーネル中に PIT が割り込み、_isr08 が syscall の途中で走ってハングする。
+ * (2) BDA バッファを埋める BIOS の INT 09h は IF=1 の窓でしか走らず、KYIELD(sti;hlt;cli)
+ * では IRQ0 が優先して IRQ1 がほぼ処理されない(QEMU で確認)。
+ * なので IRQ1 は PIC でマスクして BIOS に取らせず、ここで全部読む。
+ * 配列は US(ThinkPad の JIS 配列の記号は一部ずれる。未対応)。 */
+static const char kb_norm[0x3A] =
+	"\0\0331234567890-=\b\tqwertyuiop[]\r\0asdfghjkl;'`\0\\zxcvbnm,./\0*\0 ";
+static const char kb_shift[0x3A] =
+	"\0\033!@#$%^&*()_+\b\tQWERTYUIOP{}\r\0ASDFGHJKL:\"~\0|ZXCVBNM<>?\0*\0 ";
+
+static unsigned kb_pend;          /* 0 = 無し。そうでなければ (ah<<8)|al で al==0 は特殊キー */
+static unsigned char kb_shift_on, kb_ctrl_on, kb_ext;
+
+static void kb_poll(void)
+{
+	unsigned char sc, c;
+
+	while (!kb_pend && (inb(0x64) & 0x01)) {
+		sc = inb(0x60);
+		if (sc == 0xE0) { kb_ext = 1; continue; }
+		if (sc & 0x80) {                         /* break(離した) */
+			sc &= 0x7F;
+			if (sc == 0x2A || sc == 0x36) kb_shift_on = 0;
+			else if (sc == 0x1D) kb_ctrl_on = 0;
+			kb_ext = 0;
+			continue;
+		}
+		if (sc == 0x2A || sc == 0x36) { kb_shift_on = 1; continue; }
+		if (sc == 0x1D) { kb_ctrl_on = 1; continue; }
+		if (kb_ext) {                            /* 矢印: 特殊キー(al=0, ah=スキャン) */
+			kb_ext = 0;
+			if (sc == 0x48 || sc == 0x50 || sc == 0x4B || sc == 0x4D)
+				kb_pend = (unsigned)sc << 8;
+			else if (sc == 0x53)                 /* Delete → 0x7F */
+				kb_pend = 0x7F;
+			continue;
+		}
+		if (sc >= 0x3A) continue;
+		c = (unsigned char)(kb_shift_on ? kb_shift[sc] : kb_norm[sc]);
+		if (!c) continue;
+		if (kb_ctrl_on) {
+			if (c >= 'a' && c <= 'z') c = (unsigned char)(c - 'a' + 1);
+			else if (c >= 'A' && c <= 'Z') c = (unsigned char)(c - 'A' + 1);
+			else if (c == ']') c = 0x1D;
+			else if (c == '[') c = 0x1B;
+		}
+		kb_pend = c;
+	}
+}
+
+static int bios_kbd_ready(void)
+{
+	kb_poll();
+	return kb_pend != 0;
+}
+
+int con_rx_ready(void)
+{
+	if (kbd_buf_idx < kbd_buf_len)
+		return 1;
+	if (serial_ok && (inb(COM1 + 5) & 0x01))
+		return 1;
+	return bios_kbd_ready();
+}
+
+static unsigned short bios_kbd_get(void)
+{
+	unsigned k = kb_pend;
+	kb_pend = 0;
+	return (unsigned short)k;
+}
+
+unsigned char con_getc(void)
+{
+	unsigned char c;
+
+	/* 1. バッファに残っていればそれを返す */
+	if (kbd_buf_idx < kbd_buf_len) {
+		return kbd_buf[kbd_buf_idx++];
+	}
+	kbd_buf_len = 0;
+	kbd_buf_idx = 0;
+
+	/* 2. COM1 または BIOS キーボードが来るまでポーリング */
+	for (;;) {
+		if (serial_ok && (inb(COM1 + 5) & 0x01)) {
+			c = inb(COM1);
+			/* QEMU 脱出ハッチ: Ctrl-](0x1D) */
+			if (c == 0x1D) {
+				outb(0xF4, 0);
+				for (;;)
+					__asm__ volatile ("hlt");
+			}
+			return c;
+		}
+
+		if (bios_kbd_ready()) {
+			unsigned short ax_val = bios_kbd_get();
+			unsigned char al = ax_val & 0xFF;
+			unsigned char ah = (ax_val >> 8) & 0xFF;
+
+			if (al != 0) {
+				/* 通常文字 */
+				return al;
+			} else {
+				/* 特殊キー (矢印等) -> ESC [ A/B/C/D に変換 */
+				unsigned char code = 0;
+				if (ah == 0x48) code = 'A'; /* 上 */
+				else if (ah == 0x50) code = 'B'; /* 下 */
+				else if (ah == 0x4D) code = 'C'; /* 右 */
+				else if (ah == 0x4B) code = 'D'; /* 左 */
+
+				if (code != 0) {
+					kbd_buf[0] = 0x1B;
+					kbd_buf[1] = '[';
+					kbd_buf[2] = code;
+					kbd_buf_len = 3;
+					kbd_buf_idx = 0;
+					return kbd_buf[kbd_buf_idx++];
+				}
+				/* その他の特殊キーは読み捨てて続行 */
+			}
+		}
+	}
+}
+
+void con_puts(const char *s)
+{
+	while (*s) {
+		if (*s == '\n')
+			con_putc('\r');
+		con_putc(*s++);
+	}
+}
+
+
+

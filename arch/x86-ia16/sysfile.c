@@ -27,9 +27,13 @@
 #include "fsbackend.h"  /* fsb_* : FS backend 界面 */
 #include "io.h"         /* kputchar / kgetchar */
 #include "kernel.h"     /* getticks */
+#include "kmem.h"       /* KW_TICKS */
+#include "pipe.h"       /* pipe_tail(case 21) */
 #include "vfs.h"
 #include "fatcmd.h"   /* klog_write(case 18) */        /* vfs_resolve : パス系入口の backend 振り分け */
 #include "dev.h"        /* DEVFS ノードの dev_ops 経由ディスパッチ(/dev/null,/dev/fda 共通) */
+
+extern void klog_write(const char *s);
 
 extern void farcpy(unsigned dseg, unsigned doff, const void *src, unsigned n);
 extern void farcpy_in(void *dst, unsigned sseg, unsigned soff, unsigned n);
@@ -42,8 +46,14 @@ extern void farcpy_in(void *dst, unsigned sseg, unsigned soff, unsigned n);
 static unsigned char ufd_kind[NUFD];
 static int           ufd_bh[NUFD];
 static const struct dev_ops *ufd_ops[NUFD];
+static unsigned seek_hi = 0;
+
+extern int con_rx_ready(void);   /* console.c(同アーキ内)。物理層の RX-ready */
+
+static int con_raw_flag;
 
 static char pathbuf[PATHMAX];
+static char pathbuf2[PATHMAX];
 static char iobuf[IOCHUNK];
 static char namebuf[13];
 
@@ -57,6 +67,48 @@ static void get_path(unsigned cseg, unsigned off)
 	pathbuf[PATHMAX - 1] = 0;
 }
 
+static void get_path2(unsigned cseg, unsigned off)
+{
+	unsigned i;
+	farcpy_in(pathbuf2, cseg, off, PATHMAX);
+	for (i = 0; i < PATHMAX; i++)
+		if (pathbuf2[i] == 0)
+			return;
+	pathbuf2[PATHMAX - 1] = 0;
+}
+
+extern unsigned char kwork[];   /* crt0.s: pid_tbl[0..7] を先頭に持つ */
+
+/* 0000:off の 1 語を読む(stage2 が置いたメモリ情報)。ES は保存して戻す。 */
+unsigned x86_lowword(unsigned off)
+{
+	unsigned v;
+	__asm__ volatile (
+		"push %%es\n\t"
+		"xor %%ax, %%ax\n\t"
+		"mov %%ax, %%es\n\t"
+		"mov %%es:(%%bx), %%ax\n\t"
+		"pop %%es"
+		: "=a"(v) : "b"(off) : "memory", "cc");
+	return v;
+}
+
+/* 使うプロセススロット数(slot0 = カーネル/シェル を含む)。メモリ(4KB ブロック)の量から決める:
+ * 2 + ブロック数/4、最大 X86_MAXSLOT。ブロックの少ない(メモリの小さい)機械ではスロットも減る。 */
+extern unsigned char x86_xmem_ok;
+extern unsigned x86_blkinfo(unsigned sel);
+extern unsigned x86_pool_blocks(void);
+
+unsigned x86_nslots(void)
+{
+	static unsigned n;
+	if (!n) {
+		unsigned t = x86_pool_blocks() / 4u + 2u;   /* blkinfo(0) だと blk_used → x86_nslots で再帰する */
+		n = t > X86_MAXSLOT ? X86_MAXSLOT : t;
+	}
+	return n;
+}
+
 unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
                   unsigned si, unsigned di, unsigned cseg)
 {
@@ -67,10 +119,30 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
 	case 1:
 		kputchar((int)(unsigned char)al);
 		return al;
-	case 2:
-		return (unsigned)(unsigned char)kgetchar();
+	case 2: {
+		/* EOF(パイプの終端 / < FILE の終端)は -1。以前は unsigned char に切り詰めて 0xFF にしており、
+		 * cat がパイプ後段で EOF を認識できず 0xFF を垂れ流した。0xFFFF で返す。 */
+		int gc = kgetchar();
+		return gc < 0 ? 0xFFFFu : (unsigned)(unsigned char)gc;
+	}
 	case 3:
-		return getticks();
+		/* sti は入れない: syscall は単一の sc_stack で IF=0 のまま走る。ここで sti すると
+		 * タイマ ISR が syscall 途中で別プロセスへ切り替え、そのプロセスの syscall が
+		 * sc_stack を上書きして元の syscall フレームが壊れる(a & / b & が B しか出ない症状)。
+		 * ticks はユーザコード走行中(IF=1)に進むので、sti 無しでも delay ループは進む。 */
+		/* 共有の getticks() は中で KYIELD(x86 では sti;hlt;cli)するので syscall 内では使えない
+		 * (IF=1 になって別プロセスへ切り替わり、単一の sc_stack が衝突する)。tick を直接読む。 */
+		return *(volatile unsigned int *)KW_TICKS;
+	case 16:
+		return (unsigned)time_get();
+	case 17:
+		/* input_ready */
+		return (unsigned)(con_rx_ready() ? 1 : 0);
+	case 35:
+		/* con_raw(on) */
+		con_raw_flag = (int)al;
+		return 0;
+
 
 	case 4: {
 		unsigned u;
@@ -223,6 +295,104 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
 	case 12:
 		return (unsigned)kdir_size();
 
+	case 13: {
+		unsigned u = bx;
+		unsigned lo = cx;
+		unsigned hi = si;
+		unsigned long offset = ((unsigned long)hi << 16) | (unsigned long)lo;
+		unsigned long newpos;
+
+		if (al == 3) {
+			return seek_hi;
+		}
+
+		if (u >= NUFD || ufd_kind[u] != 1) {
+			seek_hi = 0xFFFF;
+			return 0xFFFF;
+		}
+
+		if (al == 0) {
+			newpos = offset;
+		} else if (al == 2) {
+			newpos = fsb_size(ufd_bh[u]) + offset;
+		} else {
+			seek_hi = 0xFFFF;
+			return 0xFFFF;
+		}
+
+		if (fsb_seek(ufd_bh[u], newpos) != FSB_OK) {
+			seek_hi = 0xFFFF;
+			return 0xFFFF;
+		}
+
+		seek_hi = (unsigned)(newpos >> 16);
+		return (unsigned)(newpos & 0xFFFF);
+	}
+
+	case 21:
+		/* pipe_tail(want): パイプ後段の tail。writer 完了まで待つ(proc_block)ので、待っている間は
+		 * プロセスごとの syscall スタックで他プロセスが走る。 */
+		return pipe_tail(al);
+
+	case 53:
+		/* meminfo(sel): stage2 が BIOS から集めた値。0=従来メモリ KB 1=拡張 KB(INT15h/88h) 2=E801 の 1〜16MB を KB 3=E801 の 16MB 超を 64KB 単位 4=実行時スロット数 */
+		if (al == 4)
+			return x86_nslots();
+		if (al >= 6 && al <= 9)
+			return x86_blkinfo(al - 6);   /* 6=ブロック総数 7=使用中 8=空き 9=最大連続空き(4KB 単位) */
+		if (al == 5)
+			return x86_xmem_ok;           /* アンリアルモードで拡張メモリを読み書きできたか */
+		return al < 4 ? x86_lowword(0x512 + 2 * al) : 0xFFFF;
+
+	case 14:
+		get_path(cseg, si);
+		if (vfs_resolve(pathbuf) != VFS_FAT)   /* /dev 配下は作成不可 */
+			return 0xFF;
+		{
+			int r = fsb_mkdir(pathbuf);
+			if (r == FSB_OK)
+				return 0;
+			return (r == FSB_DENIED) ? 0xFF : 1;
+		}
+
+	case 15:
+		get_path(cseg, si);
+		get_path2(cseg, di);
+		if (vfs_resolve(pathbuf) != VFS_FAT || vfs_resolve(pathbuf2) != VFS_FAT)
+			return 0xFF;
+		{
+			int src_fh, dst_fh, dst_dh, r;
+			src_fh = fsb_open(pathbuf, FSB_READ);
+			if (src_fh < 0) {
+				dst_dh = fsb_opendir(pathbuf);
+				if (dst_dh < 0)
+					return 1;
+				fsb_closedir(dst_dh);
+			} else {
+				fsb_close(src_fh);
+			}
+
+			r = fsb_rename(pathbuf, pathbuf2);
+			if (r == FSB_OK)
+				return 0;
+
+			dst_fh = fsb_open(pathbuf2, FSB_READ);
+			if (dst_fh >= 0) {
+				fsb_close(dst_fh);
+				dst_dh = fsb_opendir(pathbuf2);
+				if (dst_dh < 0) {
+					fsb_unlink(pathbuf2);
+					r = fsb_rename(pathbuf, pathbuf2);
+					if (r == FSB_OK)
+						return 0;
+				} else {
+					fsb_closedir(dst_dh);
+				}
+			}
+
+			return (r == FSB_DENIED) ? 0xFF : 1;
+		}
+
 	case 18:
 		/* klog(SI=msg): /var/log/message へ 1 行追記。実体は
 		 * src/fatcmd.c の klog_write(全 ARCH 共有)。番号は
@@ -232,6 +402,16 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
 		get_path(cseg, si);
 		klog_write(pathbuf);
 		return 0;
+
+	case 19:
+		return (unsigned)kfs_df(al);
+
+	case 20:
+		/* slot(n): pid 表(crt0.s の kwork[0..7])の n 番。0=空き、それ以外=占有。
+		 * n が実行時スロット数以上なら 0xFFFF(ユーザ側の syscall5 が 0xFFFFFFFF に伸ばす。/bin/free の終端)。 */
+		if (al >= x86_nslots())
+			return 0xFFFF;
+		return ((volatile unsigned char *)kwork)[al];
 	}
 	return 0xFFFF;
 }

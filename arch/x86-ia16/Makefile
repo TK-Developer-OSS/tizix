@@ -25,9 +25,24 @@ IMG = disk/floppy.img
 
 # arch 固有(console phys / storage 下位層 / ブート / syscall ディスパッチ /
 #   カーネルパイプ非対応の穴埋め stub / /dev/fda 実体)+ 共有の libc.o
+# コンソールは arch/x86-ia16/console.c 1 本: VGA テキスト(B800:0 直書き)+ PS/2 キーボード(8042 直読み)
+# + COM1(16550 を起動時に検出し、無ければ使わない)。以前の COM1 専用版と画面版の分離は廃止(統合)。
+# プロセススロットの最大数(plat.h の X86_MAXSLOT)。crt0.s へ -Wa,--defsym,X86_N= で渡す。
+X86_MAXSLOT := $(shell sed -n 's/^\#define X86_MAXSLOT *\([0-9][0-9]*\).*/\1/p' plat.h)
+# PERSLOT: syscall スタックをスロットごとに持つ(1、既定)/ 従来の単一スタック(0)。1 だとパイプ
+# (src/pipe.c)が使える。※以前 CONSOLE=vga + PERSLOT=1 が停止していた(#182)のは、bios13_rw が ES を
+# 壊して戻り、ia16-gcc が ES に置いたポインタ(f_write の bw)がカーネル 0x1000 番地を書き換えて
+# いたため(配置次第でそこが除算コードになり暴走)。bios13.s で ES を保存して解消。
+PERSLOT ?= 1
+ifeq ($(PERSLOT),1)
+PIPEOBJ = $(OBJ)/pipe.o
+else
+PIPEOBJ = $(OBJ)/pipestub.o
+endif
+
 AOBJ = $(OBJ)/crt0.o $(OBJ)/kmain.o $(OBJ)/console.o $(OBJ)/libc.o \
        $(OBJ)/libgcc.o $(OBJ)/diskio.o $(OBJ)/bios13.o $(OBJ)/proc.o \
-       $(OBJ)/sysfile.o $(OBJ)/pipestub.o $(OBJ)/dev_fda.o
+       $(OBJ)/sysfile.o $(OBJ)/dev_fda.o $(OBJ)/xmem.o $(PIPEOBJ)
 # 共有 src/ カーネル中核(FS 非依存にしていく対象。doc「8/31 ディスカッション」)
 #   dev.o = デバイステーブル(dev_lookup)。vfs.o が vfs_init() から参照するため必須。
 SOBJ = $(OBJ)/init.o $(OBJ)/kernel.o $(OBJ)/io.o $(OBJ)/vfs.o $(OBJ)/dev.o \
@@ -52,6 +67,9 @@ KERNEL_LBA  = 9
 #   予算チェックを追加した。
 FAT_RSVD    = 160         # kernel 予算 = (160-9)*512 = 77312B ≈ 151 セクタ
 
+HDRS = $(wildcard ../../include/*.h) $(wildcard $(SRC)/*.h) $(wildcard $(SRC)/libc/*.h) $(wildcard *.h)
+UHDRS = $(wildcard ../../include/*.h) $(wildcard user/*.h)
+
 .PHONY: all run test clean
 all: $(IMG)
 
@@ -59,12 +77,12 @@ $(OBJ):
 	mkdir -p $(OBJ)
 
 $(OBJ)/%.o: %.s | $(OBJ)
+	$(CC) $(CFLAGS) -Wa,--defsym,PERSLOT=$(PERSLOT) -Wa,--defsym,X86_N=$(X86_MAXSLOT) -c -o $@ $<
+$(OBJ)/%.o: %.c $(HDRS) | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
-$(OBJ)/%.o: %.c | $(OBJ)
+$(OBJ)/%.o: $(SRC)/%.c $(HDRS) | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
-$(OBJ)/%.o: $(SRC)/%.c | $(OBJ)
-	$(CC) $(CFLAGS) -c -o $@ $<
-$(OBJ)/%.o: $(SRC)/libc/%.c | $(OBJ)
+$(OBJ)/%.o: $(SRC)/libc/%.c $(HDRS) | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # --- カーネル (フラットバイナリ, 0 起点) ---
@@ -100,8 +118,8 @@ $(OBJ)/ulibc.o: user/ulibc.c user/stdio.h | $(OBJ)
 
 # コマンド実体のビルドは下の tzport 経由のみ(arch/x86-ia16/user/ にはコマンド
 # ソースを置かない方針。native 用パターンルールは意図的に持たない)。
-$(OBJ)/%.bin: $(OBJ)/ucmd_%.o $(UCRT) $(ULIB) user/cmd.ld
-	$(LD) -T user/cmd.ld -o $@ $(UCRT) $< $(ULIB)
+$(OBJ)/%.bin: $(OBJ)/ucmd_%.o $(UCRT) $(ULIB) $(OBJ)/libc.o user/cmd.ld
+	$(LD) -T user/cmd.ld -o $@ $(UCRT) $(OBJ)/libc.o $< $(ULIB)
 
 # ---- tzport: 共有 user/<cmd>.c(tzcc 向け書式)を x86 でもビルドする ----
 #   tzcc(tizix/tzcc/)は ia16 の対象外なので、共有ソースへ user/tzstdio.h
@@ -113,7 +131,6 @@ $(OBJ)/%.bin: $(OBJ)/ucmd_%.o $(UCRT) $(ULIB) user/cmd.ld
 #   readdir/closedir/unlink 止まり(tzstdio.h の注記参照)。mkdir/rename/
 #   fseek 等を使うコマンドは対象外。
 TZSRC       = ../../user
-TZPORT_DIR  = $(OBJ)/tzport
 #   tail は pipe_tail()(z80 カーネルパイプ専用、x86 未実装)に依存するため対象外。
 #
 #   ★2026-09-12: arch/x86-ia16/user/ にコマンド実体(ls.c/cp.c/wc.c/hello.c/
@@ -125,19 +142,23 @@ TZPORT_DIR  = $(OBJ)/tzport
 #   usyscall.s/tzstdio.h/argv_init.c/cmd.ld のみ)。
 #   xxd は共通 user/ に対応が無い x86 専用デバッグコマンドだったので削除
 #   (対応を追加するなら共通 user/xxd.c を新設すること。x86 専用の別実装は作らない)。
-TZPORT_CMDS = echo cat head rm touch grep ls cp wc hello a b rsyslog
+# コマンド一覧は全アーキ共通の arch/common-ucmds.mk(UCMDS_BASE)から取る(#181)。x86 でビルドしないもの:
+#   sh     = カーネル内蔵(src/sh.c が SOBJ。外部 sh.bin は不要)
+#   tzsh   = 外部 sh(tzsh)向け syscall 22〜34 が未実装
+#   mbtest = 郵便受け syscall 47〜51 が未実装
+#   dd     = /dev/fda 読みの #165 が未検証(Makefile から外れていた。LOW)
+include ../common-ucmds.mk
+X86_SKIP = sh tzsh mbtest dd
+# x86 専用のコマンド(arch/x86-ia16/user/<名前>.c)。ネット PoC(#187)など。
+X86_ARCH_UCMDS = netpoc
+TZPORT_CMDS = $(filter-out $(X86_SKIP),$(UCMDS_BASE)) $(X86_ARCH_UCMDS)
 
-$(TZPORT_DIR):
-	mkdir -p $(TZPORT_DIR)
-
-$(TZPORT_DIR)/stdio.h: user/tzstdio.h | $(TZPORT_DIR)
-	cp $< $@
-
-$(TZPORT_DIR)/%.c: $(TZSRC)/%.c | $(TZPORT_DIR)
-	cp $< $@
-
-$(OBJ)/ucmd_%.o: $(TZPORT_DIR)/%.c $(TZPORT_DIR)/stdio.h | $(OBJ)
+# 共有 user/<cmd>.c を直接コンパイルする(#181)。共通 user/stdio.h が __ia16__ のとき
+# user/tzstdio.h を読むので、以前の obj/tzport へのコピーは不要になった。
+$(OBJ)/ucmd_%.o: $(TZSRC)/%.c $(TZSRC)/stdio.h user/tzstdio.h $(UHDRS) | $(OBJ)
 	$(CC) $(UCFLAGS) -c -o $@ $<
+$(OBJ)/ucmd_%.o: user/%.c user/tzstdio.h $(UHDRS) | $(OBJ)
+	$(CC) $(UCFLAGS) -I$(TZSRC) -c -o $@ $<
 
 TZPORT_BINS = $(addprefix $(OBJ)/,$(addsuffix .bin,$(TZPORT_CMDS)))
 

@@ -69,6 +69,8 @@ int  fsb_rename(const char *oldabs, const char *newabs);
 
 /* ---- マウント(boot 時に 1 回) ---- */
 int  fsb_mount(void);
+int  fsb_getfree(unsigned long *tot_sect, unsigned long *fre_sect);
+int  fsb_sync(int fh);
 
 /* ==================================================================
  * block device 界面(FS backend ⇄ arch storage 下位層)

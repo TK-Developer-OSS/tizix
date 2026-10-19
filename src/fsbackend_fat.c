@@ -184,3 +184,24 @@ int fsb_rename(const char *oldabs, const char *newabs)
 {
 	return map_fr(f_rename(oldabs, newabs));
 }
+
+int fsb_getfree(unsigned long *tot_sect, unsigned long *fre_sect)
+{
+	FATFS *fp;
+	DWORD nclst;
+	FRESULT r = f_getfree("", &nclst, &fp);
+	if (r != FR_OK)
+		return map_fr(r);
+	if (tot_sect)
+		*tot_sect = (unsigned long)((fp->n_fatent - 2) * fp->csize);
+	if (fre_sect)
+		*fre_sect = (unsigned long)(nclst * fp->csize);
+	return FSB_OK;
+}
+
+int fsb_sync(int fh)
+{
+	if (fh < 0 || fh >= NFD || !fdused[fh])
+		return FSB_ERR;
+	return map_fr(f_sync(&fdtab[fh]));
+}

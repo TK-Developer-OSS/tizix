@@ -37,8 +37,12 @@ int main(int argc, char **argv)
     char dstbuf[48];
     FILE *ifp;
     FILE *ofp;
+#if defined(__ia16__)
+    unsigned long total;           /* 64KB を超えるファイルもある(x86 は 1.44MB フロッピー) */
+#else
     unsigned total;
     int c;
+#endif
     unsigned char i;
 
     if ((unsigned)argc < 2u || argv[0] == 0 || argv[1] == 0) {
@@ -93,12 +97,34 @@ int main(int argc, char **argv)
     }
 
     total = 0;
+#if defined(__ia16__)
+    /* x86-ia16: FF_FS_TINY の win[] が 1 枚なので 1 バイトずつの読み書き交互は極端に遅い
+     * (約 450B/秒)。512B ずつ fread/fwrite する。バッファは static(x86 のユーザースタックは
+     * 引数領域 0xFF00 の直下までで約 200B しか無い)。 */
+    {
+        static char blk[512];
+        size_t got;
+        for (;;) {
+            got = fread(blk, 1, sizeof blk, ifp);
+            if (got == 0) break;
+            if (fwrite(blk, 1, got, ofp) != got) {
+                fclose(ifp);
+                fclose(ofp);
+                prs("cp: write error ");
+                puts(dst);
+                return 1;
+            }
+            total += got;
+        }
+    }
+#else
     for (;;) {
         c = fgetc(ifp);
         if (c == EOF) break;
         fputc(c, ofp);
         total++;
     }
+#endif
 
     fclose(ifp);
     fclose(ofp);
@@ -108,7 +134,11 @@ int main(int argc, char **argv)
     prs(" -> ");
     prs(dst);
     prs(" (");
+#if defined(__ia16__)
+    prnuml(total);
+#else
     prnum(total);
+#endif
     puts(" bytes)");
     return 0;
 }

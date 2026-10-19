@@ -49,6 +49,10 @@ bios13_rw:
 	push bx
 	push cx
 	push dx
+	push es                  /* ★ES は呼び出し側の値を保存する(ia16-gcc は ES を値の置き場に使い、
+	                          * 呼び出しをまたいで保持していると仮定する)。以前は ES=DS にしたまま
+	                          * 戻っていたため、f_write が ES に置いた bw ポインタが 0x1000 に化け、
+	                          * カーネル 0x1000 番地(配置次第でコード)を毎回書き換えていた(#182)。 */
 
 	push ds
 	pop  es                  /* ES = DS */
@@ -59,6 +63,34 @@ bios13_rw:
 .Lrw:
 	or   di, di
 	jz   .Lok
+	cmp  byte ptr [bp+4], 0x80
+	jb   .Lchs
+	/* HDD / USB / SD(ドライブ 0x80 以降): INT 13h 拡張(AH=42h 読み / 43h 書き)。DAP はスタック上 */
+	push 0                   /* LBA bit48..63 */
+	push 0                   /* LBA bit32..47 */
+	push 0                   /* LBA bit16..31 */
+	push si                  /* LBA bit0..15 */
+	push ds                  /* バッファのセグメント(カーネル) */
+	push bx                  /* バッファのオフセット */
+	push 1                   /* セクタ数 */
+	push 0x0010              /* DAP サイズ 16、予約 0 */
+	mov  si, sp
+	mov  ah, byte ptr [bp+12]
+	add  ah, 0x40            /* 2→42h(読み) / 3→43h(書き) */
+	xor  al, al
+	mov  dl, [bp+4]
+	int  0x13
+	jc   .Lext_err
+	mov  ax, [si+8]          /* LBA 下位(si は DAP を指す) */
+	add  sp, 16
+	mov  si, ax
+	jmp  .Lnext
+.Lext_err:
+	mov  al, ah
+	xor  ah, ah
+	add  sp, 16
+	jmp  .Lret
+.Lchs:
 	mov  ax, si
 	xor  dx, dx
 	mov  cx, 18
@@ -74,6 +106,7 @@ bios13_rw:
 	mov  ah, byte ptr [bp+12]  /* AH = op (2 read / 3 write) */
 	int  0x13
 	jc   .Lerr
+.Lnext:
 	add  bx, 512
 	inc  si
 	dec  di
@@ -86,6 +119,7 @@ bios13_rw:
 	mov  al, ah
 	xor  ah, ah
 .Lret:
+	pop  es
 	pop  dx
 	pop  cx
 	pop  bx

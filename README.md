@@ -42,7 +42,7 @@ BLK ST CMD ARGS
 | `z80-pc8801` | NEC PC-8801 (Z80, 5.25" floppy, text VRAM console) on the M88 emulator | Boots to the shell with the FAT disk, `vi` and the usual commands. Pipes are stubbed out for now (the kernel code area is tight). Not tried on real hardware. The regression suite (23 tests) runs on M88 under Wine |
 | `m68k-mega` | A bare MC68000 with an Arduino Mega2560 driving its bus (1MB SRAM, SD card) | Works on the real board (shell, pipes, background jobs, XMODEM). Simulator: m68ksim |
 | `esp32-wroom-32e` | A single ESP32 (ESP32-WROOM-32E, Xtensa LX6, 4MB flash with a FAT16 disk in it) | Boots on the real board: shell, FAT, WiFi, MCP server, GPIO and friends. The regression suite runs on Espressif's QEMU (WiFi is real-hardware only) |
-| `x86-ia16` | 16-bit x86 (qemu) | Has known bugs; not supported for now |
+| `x86-ia16` | 16-bit real-mode x86 (386 or later; PC BIOS), QEMU and real hardware (VGA text screen + PS/2 keyboard; COM1 too if the machine has one) | Boots from a floppy, a hard disk or an SD card (BIOS INT 13h). The shell, `vi`, pipes and background jobs work. Process slots and 4KB memory blocks are sized from the memory found at boot. Tried on a ThinkPad R40 (USB floppy). The regression suite runs on QEMU (floppy and IDE-disk boot) |
 
 ## How it's put together
 
@@ -120,7 +120,7 @@ We develop on Rocky Linux 9.
 | `z80-pc8801` | SDCC 4.5.0 (same as above) | [M88](http://retropc.net/cisc/m88/) (a Windows PC-8801 emulator) under Wine + Xvfb, driven by `arch/z80-pc8801/tools/winerun.py`. The emulator and the PC-8801 ROM images aren't in this repo | — (not tried) |
 | `m68k-mega` | m68k-elf binutils + gcc 8.3.0 (`m68k-elf-gcc`, `m68k-elf-ld`, `m68k-elf-objcopy`) | `m68ksim` (built from this tree; needs rocket68, see below) | the Arduino AVR toolchain (avr-gcc, avrdude) and Windows PowerShell for `arch/m68k-mega/arduino/`, `dd` for the SD card image |
 | `esp32-wroom-32e` | Espressif's `xtensa-esp32-elf-gcc` (crosstool-NG, GCC 16.1.0) and `esptool`. For WiFi you also need Espressif's WiFi binaries and lwIP 2.2.0 (not in this repo; without them it builds without WiFi) | Espressif's QEMU, `qemu-system-xtensa -machine esp32` (`make -C arch/esp32-wroom-32e run`, Ctrl-A x to quit) | `esptool` to write `flash.bin` (4MB: kernel image at 0x1000, disk at 0x100000) to the module |
-| `x86-ia16` (unsupported) | ia16-elf-gcc 6.3.0 + binutils | qemu-system-i386 | — |
+| `x86-ia16` | ia16-elf-gcc 6.3.0 + binutils, mtools, dosfstools | `qemu-system-i386` (`make ARCH=x86-ia16 clean all run`, Ctrl-] to quit) | a USB floppy drive (or an SD card / USB stick) to `dd` `disk/floppy.img` onto, and a BIOS-boot PC |
 
 Two things you'll have to get yourself — they're not in this repo:
 
@@ -224,6 +224,17 @@ tizix stands on the shoulders of others. Big thanks to:
 - **[mtools](https://www.gnu.org/software/mtools/)** and **[dosfstools](https://github.com/dosfstools/dosfstools)** — for building the FAT disk images.
 - **[Arduino](https://www.arduino.cc/)** (AVR core, avr-gcc, avrdude) — for the Mega2560 bus-host firmware.
 - **[FUZIX](https://github.com/EtchedPixels/FUZIX)** — for the inspiration.
+
+## About the x86-ia16 port
+
+A real-mode (16-bit) port for PCs with a BIOS. It is the one that grew out of a "what is the smallest thing that still looks like tizix" question, and it keeps using the shared kernel in `src/`.
+
+- **Console.** Output goes to the VGA text screen and to COM1 (the 16550 is probed at boot and skipped when it isn't there). Input comes from the PS/2 keyboard (read straight from the 8042, Japanese JIS layout table) or from COM1. ANSI escapes (`ESC[2J`, `ESC[r;cH`, `ESC[K` ...) are interpreted, so `vi` works on the screen.
+- **Boot.** `stage1` (the boot sector) loads `stage2`, which loads the kernel. Drive 0x00 is read with CHS; drive 0x80 and up (hard disk, USB stick, SD card) with the INT 13h extensions. Put the 1.44MB image at the start of the medium, no partition table.
+- **Memory.** The conventional memory above the kernel is a pool of 4KB blocks; a command takes as many blocks as its image, bss and 2KB of stack need. The number of blocks and of process slots (up to 12) follows the memory the BIOS reports. `free` shows both. Memory above 1MB is probed (and reachable through unreal mode, see `xmem.s`), but is not used by processes yet.
+- **Things to know.** Assembly routines must save and restore ES/DS (ia16-gcc keeps pointers in them across calls). The kernel has a per-process syscall stack, which is what makes pipes work.
+- **Networking (experimental).** `netpoc` talks to an NE2000 under QEMU's user-mode NAT (`-netdev user -device ne2k_isa,iobase=0x300`): ARP and ICMP ping work. A TCP/IP stack for the shared `curl`, `nc` and `dig` is planned.
+- Design notes, the verification report and the real-hardware notes are in `arch/x86-ia16/diff/` and `arch/x86-ia16/REALHW.md`.
 
 ## License
 

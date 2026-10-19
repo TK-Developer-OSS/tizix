@@ -180,6 +180,9 @@ void builtin_init(void)
     /* ブートログ。ドライバはまだ載っていないが、kprintf は物理層を内包
      * しているのでここで普通に出せる(ドライバ非依存)。認識・ロードの
      * 各段を1行ずつ吐き、何が生きて何が死んだかを起動時に見せる。 */
+#if defined(ARCH_RPI_PICO)
+    kprintf("Initializing SD card...\n");
+#endif
     if (fat_init() == 0) {                     /* FR_OK */
         kprintf("FAT Drive DETECTED\n");
     } else {
@@ -192,6 +195,16 @@ void builtin_init(void)
             ;
 #endif
     }
+
+#if defined(ARCH_RPI_PICO)
+    /* PID テーブル初期化 (Core 1 側でも確実に初期化するため)
+     * slot0 = kernel/shell (PID_IDLE = 1), slots 1.. = free (PID_FREE = 0) */
+    {
+        volatile unsigned char *pid = (volatile unsigned char *)KW_PIDTAB;
+        pid[0] = 1;  /* PID_IDLE */
+        for (unsigned char i = 1; i < KW_NSLOT; i++) pid[i] = 0;  /* PID_FREE */
+    }
+#endif
 
     vfs_init();          /* VFS 名前空間を KW_VTREE に初期化(/, /dev, ...) */
 

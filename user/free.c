@@ -69,6 +69,16 @@ int main(int argc, char **argv)
                 }
         }
 
+#if defined(__ia16__)
+        /* x86: プロセススロットはメモリの大きさと無関係の表(1KB 数は出さない)。メモリはブロック行を見る */
+        prs("process slots 1-");
+        prnum(nslot);
+        prs(": used ");
+        prnum(used);
+        prs(", free ");
+        prnum(fre);
+        putchar('\n');
+#else
         prs("slots 1-");
         prnum(nslot);
         prs(": ");
@@ -89,6 +99,8 @@ int main(int argc, char **argv)
         kb(best);
         putchar('\n');
 
+#endif
+
         for (n = 1; n <= nslot; n++) {
                 p = slot_pid(n);
                 prnum(n);
@@ -99,6 +111,34 @@ int main(int argc, char **argv)
                 putchar(n % 10 == 0 ? '\n' : ' ');
         }
         if (nslot % 10) putchar('\n');
+#if defined(__ia16__)
+        /* x86-ia16: stage2 が BIOS から集めたメモリ情報(syscall 53)。従来メモリは 64KB 単位でスロットになる。
+         * 拡張メモリ(1MB 超)は今はまだ使っていない。 */
+        prs("blocks (4KB): total ");
+        prnuml(syscall5(53, 6, 0, 0, 0));
+        prs(", used ");
+        prnuml(syscall5(53, 7, 0, 0, 0));
+        prs(", free ");
+        prnuml(syscall5(53, 8, 0, 0, 0));
+        prs(", largest free run ");
+        prnuml(syscall5(53, 9, 0, 0, 0));
+        putchar('\n');
+        prs("memory: conventional ");
+        prnuml(syscall5(53, 0, 0, 0, 0));
+        prs("KB, extended ");
+        prnuml(syscall5(53, 1, 0, 0, 0));
+        prs("KB\n");
+        prs("  E801: ");
+        prnuml(syscall5(53, 2, 0, 0, 0));
+        prs("KB + ");
+        prnuml(syscall5(53, 3, 0, 0, 0));
+        prs(" x 64KB\n");
+        prs("slots ");
+        prnuml(syscall5(53, 4, 0, 0, 0));
+        prs(", unreal mode ");
+        prs(syscall5(53, 5, 0, 0, 0) == 1 ? "ok" : "no");
+        putchar('\n');
+#endif
         return 0;
 }
 

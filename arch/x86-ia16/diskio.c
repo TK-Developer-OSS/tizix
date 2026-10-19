@@ -6,7 +6,22 @@
 #include "ff.h"
 #include "diskio.h"
 
-#define FDRIVE 0x00
+/* 起動ドライブ番号(stage2 が 0000:0510 に置く)。フロッピー 0x00 / HDD・USB・SD 0x80 以降 */
+static unsigned char fdrive;
+#define FDRIVE fdrive
+
+static unsigned char read_boot_drive(void)
+{
+	unsigned char d;
+	__asm__ volatile (
+		"push %%es\n\t"
+		"xor %%ax, %%ax\n\t"
+		"mov %%ax, %%es\n\t"
+		"mov %%es:0x510, %%al\n\t"
+		"pop %%es"
+		: "=a"(d) : : "memory");
+	return d;
+}
 
 extern void     bios13_reset(unsigned drive);
 extern unsigned bios13_rw(unsigned drive, unsigned lba, unsigned count,
@@ -18,6 +33,7 @@ DSTATUS disk_initialize(BYTE pdrv)
 {
 	if (pdrv != 0)
 		return STA_NOINIT;
+	fdrive = read_boot_drive();
 	bios13_reset(FDRIVE);
 	stat_bits = 0;
 	return 0;

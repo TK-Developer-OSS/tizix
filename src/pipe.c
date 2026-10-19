@@ -28,21 +28,7 @@
 #include "io.h"         /* con_break */
 #include "pipe.h"
 
-#if defined(ARCH_X86_IA16)
-/* ---- x86 パイプは Step 14。ビルドに含めても無害な no-op スタブ ---- */
-unsigned char pipe_setup(unsigned char r) __sdcccall(0) { (void)r; return 0; }
-void pipe_attach_writer(unsigned char w) __sdcccall(0) { (void)w; }
-void pipe_teardown(void) __sdcccall(0) {}
-int  pipe_putc(int c) __sdcccall(0) { return c; }
-int  pipe_getc(void) __sdcccall(0) { return -1; }
-unsigned char pipe_is_reader(unsigned char b) __sdcccall(0) { (void)b; return 0; }
-void pipe_note_exit(unsigned char b) __sdcccall(0) { (void)b; }
-unsigned char pipe_ovf(void) __sdcccall(0) { return 0; }
-unsigned char pipe_tail(unsigned want) __sdcccall(0) { (void)want; return 0; }
-unsigned char krun_pipe(const char *ln, const char *lp, unsigned char lc,
-                        const char *rn, const char *rp, unsigned char rc) __sdcccall(0)
-{ (void)ln;(void)lp;(void)lc;(void)rn;(void)rp;(void)rc; return 1; }
-#else
+#if 1   /* x86-ia16 も本体を使う(2026-10-18。以前は no-op スタブだった) */
 
 #define BUFCAP   0x1000u                 /* 1 ブロック = 4096B。wrap なし */
 
@@ -61,9 +47,19 @@ struct kpipe {
 typedef char kpipe_fits[(sizeof(struct kpipe) <= 0x20) ? 1 : -1];
 #endif
 
-#define P     ((volatile struct kpipe *)KW_PIPE)
 #define PIDT  ((volatile unsigned char *)KW_PIDTAB)
+#if defined(ARCH_X86_IA16)
+/* x86-ia16: プロセス枠は 64KB セグメントでバッファに流用できないので、カーネルの静的領域に
+ * 4KB を持つ。状態も kwork ではなく静的変数(kwork は x86 では KW_PIPE を持たない)。
+ * バッファ用の枠確保/解放は不要(pipe_setup/teardown で bufblk を立てるだけ)。 */
+static volatile struct kpipe kp_x86;
+static volatile unsigned char x86_pipebuf[BUFCAP];
+#define P     (&kp_x86)
+#define PBUF(pp) (x86_pipebuf)
+#else
+#define P     ((volatile struct kpipe *)KW_PIPE)
 #define PBUF(pp) ((volatile unsigned char *)BLOCK_ADDR((pp)->bufblk))   /* #82: z80 = RAM_BASE + n*4KB / PLAT_FLAT32 = plat.h の PLAT_SLOT_ADDR(n) */
+#endif
 
 /* reader を launch した直後に呼ぶ。バッファブロックを 1 個確保する。
  *   戻り 1=OK / 0=プロセス枠に空きブロック無し(sh は "out of memory")。 */
@@ -73,6 +69,11 @@ unsigned char pipe_setup(unsigned char rblk) __sdcccall(0)
 
     IRQ_OFF();
     P->bufblk = 0;
+#if defined(ARCH_X86_IA16)
+    (void)k;
+    P->bufblk = 1;                      /* 静的バッファ(枠は確保しない) */
+    if (0)
+#endif
     for (k = PROC_BLOCK_MIN; k <= PROC_BLOCK_MAX; k++) {
         if (PIDT[k] == PID_FREE) {
             PIDT[k] = PID_PIPEBUF;      /* sched_pick がスキップ / kexec は占有扱い */
@@ -104,7 +105,9 @@ void pipe_teardown(void) __sdcccall(0)
     IRQ_OFF();
     P->active = 0;
     if (P->bufblk) {                    /* 確保したブロックを返す */
+#if !defined(ARCH_X86_IA16)
         PIDT[P->bufblk] = PID_FREE;
+#endif
         P->bufblk = 0;
     }
     IRQ_ON();

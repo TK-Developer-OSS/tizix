@@ -1,6 +1,6 @@
 /* arch/x86-ia16/user/crt0cmd.s : x86 ユーザーコマンドの C ランタイム入口
  *   kexec_file が pseg:0x0100 にロードし、DS=ES=SS=CS=pseg / IP=0x0100 で進入。
- *   引数文字列は pseg:0xFF00(スペース区切り、1本の C 文字列)。
+ *   引数文字列は pseg:0x0080(スペース区切り、1本の C 文字列)。
  *   argv_init.c の build_argv() でその場 NUL 化してトークン配列 g_argv[] を
  *   作り、main(argc, argv) を呼ぶ。戻ったら INT 80h AH=0 で exit。
  *
@@ -20,6 +20,10 @@
 	.global _exit
 
 _start:
+	jmp  short 1f             /* pseg:0x100 の先頭 4 バイト: jmp(2B) + __bss_end(2B)。kexec がファイルの
+	                          * 先頭 4 バイトから __bss_end を読み、必要なブロック数(bss+スタック込み)を決める */
+	.word __bss_end
+1:
 	mov  ax, offset __bss_start
 	mov  di, ax
 	mov  cx, offset __bss_end
@@ -29,7 +33,7 @@ _start:
 	cld
 	rep  stosb                /* [__bss_start, __bss_end) を 0 埋め */
 1:
-	mov  ax, 0xFF00
+	mov  ax, 0x0080          /* 引数文字列は pseg:0x80(DOS の PSP の命令行と同じ場所。最大 63 文字) */
 	push ax                  /* build_argv(raw) の引数 */
 	call build_argv          /* ax = argc(cdecl: 呼び出し側がスタック掃除) */
 	add  sp, 2

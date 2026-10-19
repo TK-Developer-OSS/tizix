@@ -4,6 +4,11 @@
 #include "kmem.h"
 #include "pipe.h"       /* カーネルパイプ routing(ROUTE_PIPE / pipe_is_reader) */
 
+#if defined(ARCH_RPI_PICO)
+#include "pico/time.h"   /* sleep_us */
+#include "tusb.h"        /* tud_task() - TinyUSB バックグラウンド処理 */
+#endif
+
 /* ==================================================================
  * tizix カーネル I/O (block0)
  *
@@ -139,6 +144,13 @@ int kgetchar(void)
         }
         IRQ_ON();
         KYIELD();                  /* z80board: 入力待ちの間に他を回す(タイマ無し) */
+#if defined(ARCH_RPI_PICO)
+        /* PLAT_FLAT32(Pico W等)は KYIELD が no-op なので、
+         * USB CDC 割り込み処理のために tud_task() を呼ぶ。
+         * sleep_us は 10us に短縮し、高頻度で tud_task を回す。 */
+        tud_task();                /* TinyUSB イベント処理 (必須) */
+        sleep_us(10);              /* 10us 休んで USB スタックに処理時間を与える */
+#endif
     }
 }
 
@@ -166,6 +178,9 @@ int con_break(void)
     /* z80board: sh の前景待ち / krun_wait はここをポーリングする。タイマが
      * 無いので、ここで譲らないと子に CPU が渡らない。 */
     KYIELD();
+#if defined(ARCH_RPI_PICO)
+    tud_task();                /* TinyUSB イベント処理 (必須) */
+#endif
     if (in_on)         return 0;
 #ifdef KW_CONRAW
     /* 生モード中(tty の ISIG を切った状態)は 0x03 をデータとして前景に渡す。

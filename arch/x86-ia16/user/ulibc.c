@@ -13,7 +13,7 @@ int getchar(void)
 {
 	unsigned r;
 	__asm__ volatile ("int $0x80" : "=a"(r) : "a"((unsigned)0x0200));
-	return (int)(unsigned char)r;
+	return r == 0xFFFFu ? -1 : (int)(unsigned char)r;   /* 0xFFFF = EOF */
 }
 
 unsigned getticks(void)

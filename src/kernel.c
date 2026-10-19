@@ -4,10 +4,13 @@
 #if defined(PLAT_FLAT32)
 #include "phdr.h"
 #endif
+#if defined(ARCH_RPI_PICO)
+#include "tusb.h"        /* tud_task() - TinyUSB バックグラウンド処理 */
+#endif
 
 #if defined(ARCH_X86_IA16)
 /* 絶対番地ワークの実体(kmem.h が KW_* をこの配列オフセットに再定義)。 */
-unsigned char kwork[0x160];
+unsigned char kwork[X86_KWORK_SIZE];
 #elif defined(PLAT_FLAT32)
 /* 配置も大きさも kmem.h の PLAT_FLAT32 節が積み上げで決める(スロット数は arch の plat.h)。
  * 配列そのものを 4 バイト境界に置き、その中の 32bit の項目が 4 バイト境界に
@@ -236,6 +239,12 @@ unsigned long sched_tick_sp(unsigned long cur_sp)
 {
     unsigned char c = KS_CUR;
     unsigned char n;
+
+#if defined(ARCH_RPI_PICO)
+    /* TinyUSB イベント処理: スケジューラの各ティックで呼び出し、
+     * USB CDC の受信バッファ溢れ(キー入力取りこぼし)を防ぐ。 */
+    tud_task();
+#endif
 
     KS_SPTBL[c] = cur_sp;
     for (n = 0; n < KW_NSLOT; n++) {

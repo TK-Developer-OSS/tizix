@@ -435,7 +435,7 @@
  * ================================================================== */
 #if defined(ARCH_X86_IA16)
 
-extern unsigned char kwork[0x160];        /* 実体は src/kernel.c */
+extern unsigned char kwork[];            /* 実体は src/kernel.c(大きさ X86_KWORK_SIZE) */        /* 実体は src/kernel.c */
 #define KW_BASE        ((unsigned)(void *)kwork)
 
 #undef  KW_PIDTAB
@@ -449,21 +449,45 @@ extern unsigned char kwork[0x160];        /* 実体は src/kernel.c */
 #undef  KW_TICKS
 #undef  KW_BLOCKED
 #undef  KW_WAKEPEND
+#undef  KW_CMDNAME
+#undef  KW_CMDARGS
+#undef  KW_LSDIR
+#undef  KW_CWD
+#undef  KW_PATHS
+#undef  PROC_BLOCK_MIN
+#undef  PROC_BLOCK_MAX
+#undef  KW_NSLOT
 
-#define KW_PIDTAB     (KW_BASE + 0x000)
-#define KW_SPTBL      (KW_BASE + 0x008)
-#define KW_CURRENT    (KW_BASE + 0x018)
-#define KW_VTREE      (KW_BASE + 0x019)
-#define KW_NEXTFD     (KW_BASE + 0x119)
-#define KW_OUTROUTE   (KW_BASE + 0x11A)
-#define KW_EPOCH_SEC  (KW_BASE + 0x122)
-#define KW_SUB_TICK   (KW_BASE + 0x126)
-#define KW_TICKS      (KW_BASE + 0x127)
-#define KW_BLOCKED    (KW_BASE + 0x129)
-#define KW_WAKEPEND   (KW_BASE + 0x131)
-/* x86 追加: スタックはプロセスのセグメント外(カーネル syscall スタック)にも
- * 出るので、コンテキストスイッチは SP だけでなく SS も退避する。 */
-#define KW_SSTBL      (KW_BASE + 0x140)   /* ss_tbl[8] : 退避 SS(2B×8) */
+/* x86: スロット数 N = X86_MAXSLOT(plat.h)。offset は N から積み上げる。crt0.s は current / sp_tbl / ss_tbl の 3 つを
+ * 同じ式(KW_CUR=3N、KW_SP=N、KW_SS=6N+0x10A)で持つので、ここを変えたら arch/x86-ia16/crt0.s も合わせること。 */
+#define X86_N          X86_MAXSLOT
+#define KW_NSLOT      X86_N
+#define PROC_BLOCK_MIN  1
+#define PROC_BLOCK_MAX  (X86_N - 1)
+#define KW_PIDTAB     (KW_BASE + 0)
+#define KW_SPTBL      (KW_BASE + X86_N)
+#define KW_CURRENT    (KW_BASE + 3 * X86_N)
+#define KW_VTREE      (KW_BASE + 3 * X86_N + 1)
+#define KW_NEXTFD     (KW_BASE + 3 * X86_N + 0x101)
+#define KW_OUTROUTE   (KW_BASE + 3 * X86_N + 0x102)
+#define KW_EPOCH_SEC  (KW_BASE + 4 * X86_N + 0x102)
+#define KW_SUB_TICK   (KW_BASE + 4 * X86_N + 0x106)
+#define KW_TICKS      (KW_BASE + 4 * X86_N + 0x107)
+#define KW_BLOCKED    (KW_BASE + 4 * X86_N + 0x109)
+#define KW_WAKEPEND   (KW_BASE + 5 * X86_N + 0x109)
+/* x86 追加: スタックはプロセスのセグメント外(カーネル syscall スタック)にも出るので、コンテキストスイッチは
+ * SP だけでなく SS も退避する。 */
+#define KW_SSTBL      (KW_BASE + 6 * X86_N + 0x10A)   /* ss_tbl[N] : 退避 SS(2B×N) */
+
+/* 以前の x86 は z80 の絶対番地(KW_CMDNAME 0x830B / KW_LSDIR 0x85C2 / KW_CWD 0x8920 / KW_PATHS 0x8950 など)を
+ * そのままカーネルセグメントの番地として使っていた(配置依存の破壊の一因)。kwork の中に実体を持つ。 */
+#define X86_EXT_OFF    (8 * X86_N + 0x10A + 0x10)                    /* 拡張領域の先頭(ss_tbl の直後) */
+#define KW_CMDNAME    (KW_BASE + X86_EXT_OFF)                       /* cmdtbl_name[N][16] */
+#define KW_CMDARGS    (KW_BASE + X86_EXT_OFF + 16 * X86_N)          /* cmdtbl_args[N][8]  */
+#define KW_LSDIR      (KW_BASE + X86_EXT_OFF + 24 * X86_N)          /* struct kdir(~44B → 48B 確保) */
+#define KW_CWD        (KW_BASE + X86_EXT_OFF + 24 * X86_N + 48)     /* cwd(48B) */
+#define KW_PATHS      (KW_BASE + X86_EXT_OFF + 24 * X86_N + 96)     /* N × 2 枠 × 48B */
+#define X86_KWORK_SIZE (X86_EXT_OFF + 120 * X86_N + 96)
 
 #endif /* ARCH_X86_IA16 */
 

@@ -64,9 +64,8 @@ $(OBJ)/%.o: $(SRC)/libc/%.c $(HDRS) | $(OBJ)
 #   コンパイラを見て中身を切り替えるようになり(gcc では syscall5 経由の側)、
 #   date.c / free.c も共有になったので、写す理由が無くなった。
 #   コマンドを足すときはここに名前を 1 つ足す(全 gcc 系アーキに載る)。
-UCMDS = ls echo cat head tail rm touch cp wc hello grep sed uniq tee whoami uname \
-        date du mkdir mv rmdir sleep id a b dd vi rsyslog df uptime free history \
-        ptx prx sh rx mbtest tzsh $(ARCH_UCMDS)
+include $(dir $(lastword $(MAKEFILE_LIST)))common-ucmds.mk
+UCMDS = $(UCMDS_BASE) $(ARCH_UCMDS)
 # ARCH_UCMDS: そのアーキだけに載せるコマンド(include より前に決めておく。esp32 のネット系など)
 
 # コマンドはヘッダ 3 本と plat.h(TICK_HZ の倍率や枠の大きさ)に依存する。
