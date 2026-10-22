@@ -29,6 +29,7 @@ IMG = disk/floppy.img
 # + COM1(16550 を起動時に検出し、無ければ使わない)。以前の COM1 専用版と画面版の分離は廃止(統合)。
 # プロセススロットの最大数(plat.h の X86_MAXSLOT)。crt0.s へ -Wa,--defsym,X86_N= で渡す。
 X86_MAXSLOT := $(shell sed -n 's/^\#define X86_MAXSLOT *\([0-9][0-9]*\).*/\1/p' plat.h)
+X86_SCSTK_SHIFT := $(shell sed -n 's/^\#define X86_SCSTK_SHIFT *\([0-9][0-9]*\).*/\1/p' plat.h)
 # PERSLOT: syscall スタックをスロットごとに持つ(1、既定)/ 従来の単一スタック(0)。1 だとパイプ
 # (src/pipe.c)が使える。※以前 CONSOLE=vga + PERSLOT=1 が停止していた(#182)のは、bios13_rw が ES を
 # 壊して戻り、ia16-gcc が ES に置いたポインタ(f_write の bw)がカーネル 0x1000 番地を書き換えて
@@ -42,7 +43,7 @@ endif
 
 AOBJ = $(OBJ)/crt0.o $(OBJ)/kmain.o $(OBJ)/console.o $(OBJ)/libc.o \
        $(OBJ)/libgcc.o $(OBJ)/diskio.o $(OBJ)/bios13.o $(OBJ)/proc.o \
-       $(OBJ)/sysfile.o $(OBJ)/dev_fda.o $(OBJ)/xmem.o $(PIPEOBJ)
+       $(OBJ)/sysfile.o $(OBJ)/dev_fda.o $(PIPEOBJ)
 # 共有 src/ カーネル中核(FS 非依存にしていく対象。doc「8/31 ディスカッション」)
 #   dev.o = デバイステーブル(dev_lookup)。vfs.o が vfs_init() から参照するため必須。
 SOBJ = $(OBJ)/init.o $(OBJ)/kernel.o $(OBJ)/io.o $(OBJ)/vfs.o $(OBJ)/dev.o \
@@ -77,7 +78,7 @@ $(OBJ):
 	mkdir -p $(OBJ)
 
 $(OBJ)/%.o: %.s | $(OBJ)
-	$(CC) $(CFLAGS) -Wa,--defsym,PERSLOT=$(PERSLOT) -Wa,--defsym,X86_N=$(X86_MAXSLOT) -c -o $@ $<
+	$(CC) $(CFLAGS) -Wa,--defsym,PERSLOT=$(PERSLOT) -Wa,--defsym,X86_N=$(X86_MAXSLOT) -Wa,--defsym,SCSTK_SHIFT=$(X86_SCSTK_SHIFT) -c -o $@ $<
 $(OBJ)/%.o: %.c $(HDRS) | $(OBJ)
 	$(CC) $(CFLAGS) -c -o $@ $<
 $(OBJ)/%.o: $(SRC)/%.c $(HDRS) | $(OBJ)

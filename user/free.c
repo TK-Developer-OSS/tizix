@@ -126,8 +126,25 @@ int main(int argc, char **argv)
         prs("memory: conventional ");
         prnuml(syscall5(53, 0, 0, 0, 0));
         prs("KB, extended ");
-        prnuml(syscall5(53, 1, 0, 0, 0));
-        prs("KB\n");
+        {
+                /* INT 15h/88h は 64MB 弱で頭打ち(AX=0xFFFF)。syscall の 0xFFFF は -1 に化けるので頭打ちと見て注記する。
+                 * 実際の量は E801(1〜16MB の KB + 16MB 超の 64KB 単位)から 32bit で合成する。 */
+                unsigned long a88 = syscall5(53, 1, 0, 0, 0);
+                unsigned long lo = syscall5(53, 2, 0, 0, 0);
+                unsigned long hi = syscall5(53, 3, 0, 0, 0);
+                if (lo == 0xFFFFFFFFUL) lo = 0xFFFF;
+                if (hi == 0xFFFFFFFFUL) hi = 0xFFFF;
+                if (hi != 0 || lo != 0) {
+                        prnuml(lo + (hi << 6));
+                        prs("KB");
+                } else if (a88 == 0xFFFFFFFFUL) {
+                        prs("65535KB+");
+                } else {
+                        prnuml(a88);
+                        prs("KB");
+                }
+        }
+        putchar('\n');
         prs("  E801: ");
         prnuml(syscall5(53, 2, 0, 0, 0));
         prs("KB + ");
@@ -135,9 +152,18 @@ int main(int argc, char **argv)
         prs(" x 64KB\n");
         prs("slots ");
         prnuml(syscall5(53, 4, 0, 0, 0));
-        prs(", unreal mode ");
-        prs(syscall5(53, 5, 0, 0, 0) == 1 ? "ok" : "no");
+        {
+                /* アンリアルモードを持つ arch だけが selector 5 に答える(持たない arch は 0xFFFF=-1 → 表示しない) */
+                unsigned long um = syscall5(53, 5, 0, 0, 0);
+                if (um != 0xFFFFFFFFUL) {
+                        prs(", unreal mode ");
+                        prs(um == 1 ? "ok" : "no");
+                }
+        }
         putchar('\n');
+        prs("syscall stack headroom ");
+        prnuml(syscall5(53, 10, 0, 0, 0));
+        prs("B\n");
 #endif
         return 0;
 }

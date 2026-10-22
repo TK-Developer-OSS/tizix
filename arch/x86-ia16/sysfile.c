@@ -95,9 +95,9 @@ unsigned x86_lowword(unsigned off)
 
 /* 使うプロセススロット数(slot0 = カーネル/シェル を含む)。メモリ(4KB ブロック)の量から決める:
  * 2 + ブロック数/4、最大 X86_MAXSLOT。ブロックの少ない(メモリの小さい)機械ではスロットも減る。 */
-extern unsigned char x86_xmem_ok;
 extern unsigned x86_blkinfo(unsigned sel);
 extern unsigned x86_pool_blocks(void);
+extern unsigned x86_scstk_headroom(void);
 
 unsigned x86_nslots(void)
 {
@@ -340,8 +340,8 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
 			return x86_nslots();
 		if (al >= 6 && al <= 9)
 			return x86_blkinfo(al - 6);   /* 6=ブロック総数 7=使用中 8=空き 9=最大連続空き(4KB 単位) */
-		if (al == 5)
-			return x86_xmem_ok;           /* アンリアルモードで拡張メモリを読み書きできたか */
+		if (al == 10)
+			return x86_scstk_headroom();  /* 全スロットの syscall スタックの最小余裕(バイト) */
 		return al < 4 ? x86_lowword(0x512 + 2 * al) : 0xFFFF;
 
 	case 14:

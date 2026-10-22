@@ -15,6 +15,7 @@
 	.global _start
 	.global _isr08
 	.global _isr80
+	.global sc_stack
 
 PIT_DIV   = 11932           /* 1193182 / 100 */
 KSEG      = 0x1000
@@ -201,13 +202,13 @@ _isr80:
 	mov  ss, ax
 	mov  es, ax
 .if PERSLOT
-	/* スロットごとに専用の syscall スタック(1KB)。syscall 中に待つ(getchar / pipe)と
+	/* スロットごとに専用の syscall スタック(X86_SCSTK_SHIFT)。syscall 中に待つ(getchar / pipe)と
 	 * 別プロセスへ切り替わるので、単一スタックだと互いに壊し合う(#143)。 */
 	mov  bl, [kwork + KW_CUR]
 	xor  bh, bh
 	inc  bx
-	mov  cl, 10
-	shl  bx, cl               /* bx = (current+1)*1024 */
+	mov  cl, SCSTK_SHIFT
+	shl  bx, cl               /* bx = (current+1) * スロット別 syscall スタックの大きさ */
 	add  bx, offset sc_stack
 	mov  sp, bx
 .else
@@ -292,7 +293,7 @@ sc_di:    .space 2
 sc_cseg:  .space 2
 sc_ret:   .space 2
 .if PERSLOT
-sc_stack: .space 1024 * X86_N   /* スロットごと 1KB */
+sc_stack: .space (1 << SCSTK_SHIFT) * X86_N   /* スロットごと(plat.h の X86_SCSTK_SHIFT) */
 .else
 sc_stack: .space 1024
 sc_stack_top:

@@ -1,6 +1,6 @@
 # x86-ia16 動作確認レポート(2026-10-19、Claude)
 
-コミット `aa74cd3` 時点(4KB ブロックのプール + 可変スロット + アンリアルモード PoC + コンソール統合)。
+コミット `aa74cd3` 時点(4KB ブロックのプール + 可変スロット + コンソール統合)。
 
 ## 確認した項目と結果(QEMU)
 
@@ -10,8 +10,8 @@
 | 回帰試験 test_interactive.py(フロッピー起動) | 3 周連続 FAIL 0 |
 | 回帰試験(HDD 起動 `TIZIX_BOOT=hdd`、QEMU `-drive if=ide -boot c`) | FAIL 0 |
 | キーボード入力(8042 直読み、QEMU sendkey) | 成功(test_bios_kbd.py) |
-| メモリ検出(`-m 16`) | 従来 639KB / 拡張 15232KB、ブロック 127、スロット 12、unreal mode ok |
-| メモリ検出(`-m 1`) | 拡張 0KB、unreal mode no(正しく失敗を検出) |
+| メモリ検出(`-m 16`) | 従来 639KB / 拡張 15232KB、ブロック 127、スロット 12 |
+| メモリ検出(`-m 1`) | 拡張 0KB |
 | 背景ジョブ | `a &` を 10 本同時に実行、free は slots 1-11 used 11 / blocks used 22 / free 105。12 本目は「no free block」 |
 | パイプ | `echo hello \| cat`、`cat /etc/rc \| head -1`、`ls \| wc`、`tail -2 /etc/rc \| head -1`、`cat /etc/rc \| tail -1` が正しい |
 | vi | 起動・編集・`:wq`・画面制御(ANSI)が正しい |
