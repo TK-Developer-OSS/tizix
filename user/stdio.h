@@ -22,7 +22,11 @@
  * gcc 枝の syscall5(func, a1..a4)とは規約が違う。実装は arch 側に置き、ここから読む(#181)。
  * これで x86 も共通 user/<cmd>.c をコピーせずにそのままビルドできる。
  * ================================================================== */
+#if defined(TIZIX_I386_UNREAL)
+#include "../arch/x86-i386-unreal/user/tzstdio.h"   /* x86-i386-unreal は自分の写しを使う(x86-ia16 とは別に育てる) */
+#else
 #include "../arch/x86-ia16/user/tzstdio.h"
+#endif
 
 #elif defined(__SDCC)
 /* ==================================================================

@@ -43,6 +43,7 @@ BLK ST CMD ARGS
 | `m68k-mega` | A bare MC68000 with an Arduino Mega2560 driving its bus (1MB SRAM, SD card) | Works on the real board (shell, pipes, background jobs, XMODEM). Simulator: m68ksim |
 | `esp32-wroom-32e` | A single ESP32 (ESP32-WROOM-32E, Xtensa LX6, 4MB flash with a FAT16 disk in it) | Boots on the real board: shell, FAT, WiFi, MCP server, GPIO and friends. The regression suite runs on Espressif's QEMU (WiFi is real-hardware only) |
 | `x86-ia16` | 16-bit real-mode x86 (386 or later; PC BIOS), QEMU and real hardware (VGA text screen + PS/2 keyboard; COM1 too if the machine has one) | Boots from a floppy, a hard disk or an SD card (BIOS INT 13h). The shell, `vi`, pipes and background jobs work. Process slots and 4KB memory blocks are sized from the memory found at boot. Tried on a ThinkPad R40 (USB floppy). The regression suite runs on QEMU (floppy and IDE-disk boot) |
+| `x86-i386-unreal` | x86 PCs with a 386 or later and 4MB of memory or more, in unreal mode (real mode that can reach all 4GB; see [the section below](#about-the-x86-i386-unreal-port-unreal-mode)). QEMU and real hardware | Grew out of `x86-ia16`. The kernel's C is compiled by tzcc. Boots from a floppy; the shell, `vi`, pipes, XMODEM, an interrupt-driven serial driver, networking through an RS-232C modem (including `telnetd` for dial-in) and updating itself over the serial line work. Tried on a Dell PowerEdge T105 (USB floppy, 2GB). The regression suite runs on QEMU (128MB) and, over a serial cable, on the real machine |
 
 ## How it's put together
 
@@ -121,6 +122,7 @@ We develop on Rocky Linux 9.
 | `m68k-mega` | m68k-elf binutils + gcc 8.3.0 (`m68k-elf-gcc`, `m68k-elf-ld`, `m68k-elf-objcopy`) | `m68ksim` (built from this tree; needs rocket68, see below) | the Arduino AVR toolchain (avr-gcc, avrdude) and Windows PowerShell for `arch/m68k-mega/arduino/`, `dd` for the SD card image |
 | `esp32-wroom-32e` | Espressif's `xtensa-esp32-elf-gcc` (crosstool-NG, GCC 16.1.0) and `esptool`. For WiFi you also need Espressif's WiFi binaries and lwIP 2.2.0 (not in this repo; without them it builds without WiFi) | Espressif's QEMU, `qemu-system-xtensa -machine esp32` (`make -C arch/esp32-wroom-32e run`, Ctrl-A x to quit) | `esptool` to write `flash.bin` (4MB: kernel image at 0x1000, disk at 0x100000) to the module |
 | `x86-ia16` | ia16-elf-gcc 6.3.0 + binutils, mtools, dosfstools | `qemu-system-i386` (`make ARCH=x86-ia16 clean all run`, Ctrl-] to quit) | a USB floppy drive (or an SD card / USB stick) to `dd` `disk/floppy.img` onto, and a BIOS-boot PC |
+| `x86-i386-unreal` | ia16-elf-gcc 6.3.0 + binutils (preprocessor, assembler, linker, and the commands), tzcc (built from `tzcc/`) for the kernel, mtools, dosfstools | `qemu-system-i386 -m 128` (`arch/x86-i386-unreal/tz/check.sh` builds and boots the tzcc kernel) | a USB floppy drive to `dd` `disk/floppy_tz.img` onto and a BIOS-boot PC with a 386 or later and 4MB+. For networking: a serial cable and a Hayes-style modem (a Raspberry Pi with a USB serial adapter running `python/at_modem.py --serial` stands in for a WiFi modem); lrzsz (`sx`) for sending files by XMODEM |
 
 Two things you'll have to get yourself — they're not in this repo:
 
@@ -139,6 +141,7 @@ make sims                             # build cpmsim / z80boardsim from the z80p
 make                      # ARCH=z80pack (default): kernel, commands and the FAT disk image
 make ARCH=z80board        # the z80board ROM image
 make ARCH=m68k-mega       # m68k-mega: kernel, m68ksim and the disk image
+make -C arch/x86-i386-unreal -f Makefile.tz OBJ=obj/tz IMG=disk/floppy_tz.img   # x86-i386-unreal: tzcc kernel + commands
 ```
 
 ### Docker
@@ -235,6 +238,24 @@ A real-mode (16-bit) port for PCs with a BIOS. It is the one that grew out of a 
 - **Things to know.** Assembly routines must save and restore ES/DS (ia16-gcc keeps pointers in them across calls). The kernel has a per-process syscall stack, which is what makes pipes work.
 - **Networking (experimental).** `netpoc` talks to an NE2000 under QEMU's user-mode NAT (`-netdev user -device ne2k_isa,iobase=0x300`): ARP and ICMP ping work. A TCP/IP stack for the shared `curl`, `nc` and `dig` is planned.
 - Design notes, the verification report and the real-hardware notes are in `arch/x86-ia16/diff/` and `arch/x86-ia16/REALHW.md`.
+
+## About the x86-i386-unreal port (unreal mode)
+
+Why put tizix on an x86 PC at all, when Linux and the BSDs run there just fine? Two reasons:
+
+- **A hobby: a second life for old PCs.** Plenty of PCs have no job left. Giving one a small system you can read from end to end, and having fun with it, is the point.
+- **Groundwork.** It is a stepping stone toward an x86 kernel that we plan to develop on a separate line later.
+
+**What unreal mode is.** On a 386 or later, the CPU keeps a hidden limit for each segment register. Switch to protected mode for a moment, load DS/ES/FS/GS with 4GB-limit descriptors, and come straight back to real mode: the segments still have the 4GB limit. The machine is in plain real mode again (BIOS calls, 16-bit code, the usual segment:offset), but a 32-bit offset can now reach any byte of the first 4GB. It is not an official CPU mode, but every 386 and later behaves this way. `arch/x86-i386-unreal/xmem.s` sets it up at boot and checks it with a write/read round trip above 1MB; the boot banner says `unreal mode: ok`.
+
+**What this port has today.**
+
+- **Floor: a 386 and 4MB.** The kernel stops with a message on anything smaller. QEMU runs it with 128MB; the Dell PowerEdge T105 we use as the real-hardware bench has 2GB, all of it visible to unreal mode.
+- **The kernel's C is compiled by tzcc**, our own compiler (its 16-bit x86 backend), not by ia16-gcc. ia16-gcc assumes the stack and data segments are the same (SS = DS), which is a dead end for what comes next: putting a process's data above 1MB is planned as a tzcc memory model for unreal mode. The commands are still built with ia16-gcc.
+- **High memory today**: `mmio` reads and writes any physical address (PCI device registers near 4GB included; `lspci -v` lists them). Ordinary programs cannot keep their own data above 1MB yet.
+- **Serial**: an interrupt-driven 16550 driver for COM1 and COM2 with receive buffers, so waiting programs sleep instead of spinning, and a paste does not lose bytes. The console and the modem share it; `sercon off` hands COM1 over to a modem on a machine with one serial port.
+- **Networking through an RS-232C modem**, the way a PC of that era would: `ntpdate`, `curl`, `telnet` dial out with `ATDT host:port`, and `telnetd` answers incoming calls (`RING` / `ATA`) and shares the console with the caller. A Raspberry Pi with a USB serial adapter running `python/at_modem.py --serial /dev/ttyUSB0 --listen 2323` stands in for a WiFi modem.
+- **Looking after it from a distance**: files go over the serial line by XMODEM (`rx`), `sysup` rewrites the boot area (boot sector, stage2, kernel) after checking the disk format, and `reboot` restarts through INT 19h without going through the BIOS POST (a machine with a dead CMOS battery would otherwise wait for F1). `arch/x86-i386-unreal/tools/t105_update.py` puts this together: send what changed, rewrite the kernel, reboot, wait for the prompt. `tools/test_interactive.py` runs the same regression suite on QEMU or, with `TIZIX_SERIAL=/dev/ttyS0`, on the real machine over the cable.
 
 ## License
 

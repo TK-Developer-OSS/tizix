@@ -66,6 +66,8 @@ typedef enum {
     TOKEN_DEFAULT,
     TOKEN_STAR_ASSIGN,  // *=
     TOKEN_SLASH_ASSIGN, // /=
+    TOKEN_IA16_PERCENT,        // %  (--march=ia16 only)
+    TOKEN_IA16_PERCENT_ASSIGN, // %= (--march=ia16 only)
     TOKEN_UNKNOWN
 } TokenType;
 
@@ -76,6 +78,7 @@ typedef struct {
     int is_long;  // TOKEN_NUMBER: リテラルに l/L 接尾辞が付いていた（32bit 扱い）
 } Token;
 
+extern int g_ia16;   /* --march=ia16: enables the ia16-only tokens (%, %=) */
 void lexer_init(const char *source);
 char lexer_get_last_error_char();
 Token *lexer_next_token();

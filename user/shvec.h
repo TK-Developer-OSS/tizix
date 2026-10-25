@@ -73,6 +73,32 @@ typedef int (*fn_conbrk_t)(void) __sdcccall(0);
  *     SH_ROUTE          … 出力ルート表
  * ================================================================== */
 
+#if defined(__ia16__)
+/* x86-ia16: syscall の引数は al(小さい数)/ bx / cx / si / di(ユーザーのポインタは si / di)。番号と意味は gcc 系と同じ
+ *   (arch/x86-ia16/sysfile.c)。mcpd が使う分だけ。 */
+#define kexec_argv(f, p, c)   ((unsigned char)syscall5(22, (unsigned)(c), 0, 0, (unsigned)(f), (unsigned)(p)))
+#define builtin_try(c, a)     ((int)syscall5(23, 0, 0, 0, (unsigned)(c), (unsigned)(a)))
+#define builtin_is(c)         ((int)syscall5(24, 0, 0, 0, (unsigned)(c), 0))
+#define redir_begin(f, ap)    ((int)syscall5(25, (unsigned)(ap), 0, 0, (unsigned)(f), 0))
+#define redir_end()           ((void)syscall5(26, 0, 0, 0, 0, 0))
+#define in_begin(f)           ((int)syscall5(27, 0, 0, 0, (unsigned)(f), 0))
+#define in_end()              ((void)syscall5(28, 0, 0, 0, 0, 0))
+#define kchdir(p)             ((int)syscall5(30, 0, 0, 0, (unsigned)(p), 0))
+#define kgetcwd(o)            ((void)syscall5(31, 0, 0, 0, 0, (unsigned)(o)))
+#define kcon_break()          ((int)syscall5(32, 0, 0, 0, 0, 0))
+/* krun_pipe は 6 つの引数。ia16 の syscall はレジスタが足りないので 6 語の配列で渡す(near ポインタ)。 */
+static unsigned char krun_pipe(const char *ln, const char *lp, unsigned char lc,
+                               const char *rn, const char *rp, unsigned char rc)
+{
+        unsigned a[6];
+        a[0] = (unsigned)ln; a[1] = (unsigned)lp; a[2] = lc;
+        a[3] = (unsigned)rn; a[4] = (unsigned)rp; a[5] = rc;
+        return (unsigned char)syscall5(29, 0, 0, 0, (unsigned)a, 0);
+}
+#define SH_ROUTE(n, r)        ((void)syscall5(34, (unsigned)(n), (unsigned)(r), 0, 0, 0))
+#define SH_PID(n)             ((unsigned char)syscall5(20, (unsigned)(n), 0, 0, 0, 0))
+#define SH_KILL(n)            ((void)syscall5(33, (unsigned)(n), 0, 0, 0, 0))
+#else
 #define kexec_argv(f, p, c)   ((unsigned char)syscall5(22, (unsigned long)(f), (unsigned long)(p), (unsigned long)(c), 0))
 #define builtin_try(c, a)     ((int)syscall5(23, (unsigned long)(c), (unsigned long)(a), 0, 0))
 #define builtin_is(c)         ((int)syscall5(24, (unsigned long)(c), 0, 0, 0))
@@ -98,6 +124,7 @@ static unsigned char krun_pipe(const char *ln, const char *lp, unsigned char lc,
 #define SH_PID(n)             ((unsigned char)syscall5(20, (unsigned long)(n), 0, 0, 0))
 #define SH_KILL(n)            ((void)syscall5(33, (unsigned long)(n), 0, 0, 0))
 #define SH_ROUTE(n, r)        ((void)syscall5(34, (unsigned long)(n), (unsigned long)(r), 0, 0))
+#endif /* __ia16__ */
 
 /* セッション状態(user/sh.c の struct sh_state、約 540B)。 */
 #ifndef SHVEC_NO_STATE                    /* sh 以外(tzsh)は持たない(#111) */

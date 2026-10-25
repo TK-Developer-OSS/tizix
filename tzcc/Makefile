@@ -7,7 +7,7 @@ BUILD := ../build/tzcc/z80pack
 CC = gcc
 CFLAGS = -Wall -Wextra -g
 TARGET = tzcc
-SRCS = main.c lexer.c parser.c generator.c tizix.c gen_x86.c
+SRCS = main.c lexer.c parser.c generator.c tizix.c gen_x86.c gen_ia16.c
 OBJS = $(SRCS:%.c=$(BUILD)/%.o)
 
 # tzcc 自体をスタティックリンクし、任意の x86 Linux で動くようにする。

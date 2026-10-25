@@ -32,7 +32,49 @@ int net_write(const char *buf, int len);
  * dial-on-demand が peer close を検出して自動的に次の ATD を受け付ける)。 */
 void net_close(void);
 
-#ifdef TZ_SYSCALL
+/* x86-ia16: カーネルに TCP は無い。上の 4 関数(net_connect / net_read / net_write / net_close)は
+ *   arch/x86-ia16/user/netcli16.c が ESP-AT(16550 経由)で実装する。下の gcc 側の syscall 版は使わない。 */
+#if defined(TZ_SYSCALL) && defined(__ia16__)
+/* ---- x86-ia16: gcc 側と同じ API を ESP-AT で実装(arch/x86-ia16/user/netcli16.c)。名前・値は gcc 側と揃える ---- */
+#define NET_IDLE        0
+#define NET_CONNECTING  1
+#define NET_CONNECTED   2
+#define NET_ERROR       3
+#define NET_LISTEN      4
+#define NI_FLAGS   0
+#define NI_ADDR    1
+#define NI_MASK    2
+#define NI_GW      3
+#define NI_DNS     4
+#define NI_MACHI   5
+#define NI_MACLO   6
+#define NI_RXPKT   7
+#define NI_TXPKT   8
+#define NI_MTU     9
+#define NI_STATE   16
+#define NI_RADDR   17
+#define NI_RPORT   18
+#define NI_LPORT   19
+#define NI_RXBYTE  20
+#define NI_TXBYTE  21
+#define NI_TCPST   22
+#define NI_RXIN    23
+#define NI_PEND    24
+#define NI_ARP     32
+#define NET_TLS       1
+#define NET_INSECURE  2
+int net_state(void);
+unsigned long net_info(unsigned sel);
+int net_connect_flags(const char *hostport, unsigned flags);
+int net_connect_tls(const char *hostport, int verify);
+int net_listen(unsigned port);                       /* ESP-AT の単一接続モードでは待ち受け不可: 常に -1 */
+int net_resolve(const char *name, unsigned long *addr, unsigned long *ms);
+int net_ping_send(unsigned long addr, unsigned seq, unsigned len);
+unsigned long net_ping_poll(unsigned seq, unsigned long *ttl);
+void net_pr_ip(unsigned long a);
+#endif
+
+#if defined(TZ_SYSCALL) && !defined(__ia16__)
 /* ---- gcc 側: カーネルの syscall(src/sysfile.c の 36..41)---- */
 
 /* net_state() の値(z80 の kmem.h NETSTATE_* と同じ。1 はこちらでは「接続中」) */

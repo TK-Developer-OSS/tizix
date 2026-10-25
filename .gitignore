@@ -40,6 +40,10 @@ fatimg_z80board.raw
 arch/x86-ia16/obj/
 arch/x86-ia16/disk/
 arch/x86-ia16/_layout.inc
+arch/x86-i386-unreal/obj/
+arch/x86-i386-unreal/disk/
+arch/x86-i386-unreal/_layout.inc
+arch/x86-i386-unreal/tools/.t105_sent.json
 python/tz80_state/
 
 # tzcc(tizix/tzcc/ に同居)自身のビルド成果物

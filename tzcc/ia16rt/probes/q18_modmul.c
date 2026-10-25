@@ -1,0 +1,1 @@
+int main(void) { int n; int j; char nm[4]; n = 237; j = 0; nm[j++] = '0' + n / 100; n %= 100; nm[j++] = '0' + n / 10; n %= 10; nm[j++] = '0' + n; return (nm[0]-'0')*100 + (nm[1]-'0')*10 + (nm[2]-'0'); }

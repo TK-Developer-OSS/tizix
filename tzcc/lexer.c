@@ -12,6 +12,7 @@ static char *my_strdup(const char *s) {
 }
 
 static const char *src;
+int g_ia16 = 0;   /* set by main() for --march=ia16 */
 static int line = 1;
 static char last_error_char = 0;
 
@@ -550,6 +551,11 @@ Token *lexer_next_token() {
         src++;
         if (*src == '=') { src++; tk->type = TOKEN_SLASH_ASSIGN; return tk; }
         tk->type = TOKEN_SLASH; return tk;
+    }
+    if (g_ia16 && *src == '%') {
+        src++;
+        if (*src == '=') { src++; tk->type = TOKEN_IA16_PERCENT_ASSIGN; return tk; }
+        tk->type = TOKEN_IA16_PERCENT; return tk;
     }
     if (*src == '&') {
         src++;

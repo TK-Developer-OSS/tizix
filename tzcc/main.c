@@ -102,6 +102,19 @@ static int is_tname(const char *n) {
    `x = f()` の 32bit 受け取り判定に使う（プロトタイプは AST に残らないため）。*/
 static char *g_longfuncs[128];
 static int   g_nlongfuncs = 0;
+/* ia16 only: functions declared to return a plain char. A callee compiled by another compiler (ia16-gcc) leaves AH
+   undefined, so the ia16 backend clears it after the call. Registered from prototypes and definitions alike. */
+static char *g_ia16_narrow[256];
+static int   g_ia16_nnarrow = 0;
+static void ia16_narrowfunc_register(const char *n) {
+    if (!n || !n[0] || g_ia16_nnarrow >= 256) return;
+    for (int i = 0; i < g_ia16_nnarrow; i++) if (strcmp(g_ia16_narrow[i], n) == 0) return;
+    g_ia16_narrow[g_ia16_nnarrow++] = strdup(n);
+}
+int ia16_is_narrowfunc(const char *n) {
+    for (int i = 0; i < g_ia16_nnarrow; i++) if (strcmp(g_ia16_narrow[i], n) == 0) return 1;
+    return 0;
+}
 static void longfunc_register(const char *n) {
     if (!n || !n[0] || g_nlongfuncs >= 128) return;
     for (int i = 0; i < g_nlongfuncs; i++) if (strcmp(g_longfuncs[i], n) == 0) return;
@@ -623,11 +636,13 @@ static Node* parse_unary() {
 // 乗除 * /
 static Node* parse_mul() {
     Node *node = parse_unary();
-    while (cur_token.type == TOKEN_STAR || cur_token.type == TOKEN_SLASH) {
+    while (cur_token.type == TOKEN_STAR || cur_token.type == TOKEN_SLASH
+           || cur_token.type == TOKEN_IA16_PERCENT) {
         TokenType op = cur_token.type;
         next_token();
         Node *right = parse_unary();
-        Node *n = new_node(op == TOKEN_STAR ? NODE_MUL : NODE_DIV, NULL);
+        Node *n = new_node(op == TOKEN_STAR ? NODE_MUL
+                           : op == TOKEN_IA16_PERCENT ? NODE_IA16_MOD : NODE_DIV, NULL);
         n->left = node;
         n->right = right;
         node = n;
@@ -817,10 +832,12 @@ static Node* parse_simple_stmt_nosemi() {
         return new_node(nt, strdup(id_buf));
     }
     if (cur_token.type == TOKEN_PLUS_ASSIGN || cur_token.type == TOKEN_MINUS_ASSIGN
-        || cur_token.type == TOKEN_STAR_ASSIGN || cur_token.type == TOKEN_SLASH_ASSIGN) {
+        || cur_token.type == TOKEN_STAR_ASSIGN || cur_token.type == TOKEN_SLASH_ASSIGN
+        || cur_token.type == TOKEN_IA16_PERCENT_ASSIGN) {
         NodeType op = (cur_token.type == TOKEN_PLUS_ASSIGN)  ? NODE_ADD :
                       (cur_token.type == TOKEN_MINUS_ASSIGN) ? NODE_SUB :
-                      (cur_token.type == TOKEN_STAR_ASSIGN)  ? NODE_MUL : NODE_DIV;
+                      (cur_token.type == TOKEN_STAR_ASSIGN)  ? NODE_MUL :
+                      (cur_token.type == TOKEN_IA16_PERCENT_ASSIGN) ? NODE_IA16_MOD : NODE_DIV;
         next_token();
         Node *node = new_node(NODE_ASSIGN, strdup(id_buf));
         Node *bin = new_node(op, NULL);
@@ -1195,11 +1212,13 @@ static Node* parse_stmt() {
             return node;
         }
         if (cur_token.type == TOKEN_PLUS_ASSIGN || cur_token.type == TOKEN_MINUS_ASSIGN
-            || cur_token.type == TOKEN_STAR_ASSIGN || cur_token.type == TOKEN_SLASH_ASSIGN) {
+            || cur_token.type == TOKEN_STAR_ASSIGN || cur_token.type == TOKEN_SLASH_ASSIGN
+            || cur_token.type == TOKEN_IA16_PERCENT_ASSIGN) {
             // i += expr; / i -= expr; / i *= expr; / i /= expr;  →  i = i OP expr;
             NodeType op = (cur_token.type == TOKEN_PLUS_ASSIGN)  ? NODE_ADD :
                           (cur_token.type == TOKEN_MINUS_ASSIGN) ? NODE_SUB :
-                          (cur_token.type == TOKEN_STAR_ASSIGN)  ? NODE_MUL : NODE_DIV;
+                          (cur_token.type == TOKEN_STAR_ASSIGN)  ? NODE_MUL :
+                          (cur_token.type == TOKEN_IA16_PERCENT_ASSIGN) ? NODE_IA16_MOD : NODE_DIV;
             next_token();
             Node *node = new_node(NODE_ASSIGN, strdup(id_buf));
             Node *bin = new_node(op, NULL);
@@ -1387,6 +1406,7 @@ Node* parse() {
                     Node *func = new_node(NODE_FUNC, strdup(var_buf));
                     func->is_long = (is_int == 2);   // 戻り値が long か（呼び出し側の 32bit 受け取り判定）
                     if (is_int == 2) longfunc_register(var_buf);  // 定義もプロトタイプもここを通る
+                    if (g_ia16 && is_int == 0 && !is_ptr) ia16_narrowfunc_register(var_buf);   // char を返す関数(ia16 専用)
                     int svar_save = g_nsvars;   // 仮引数含めこの関数のローカル struct-var を後で破棄
                     next_token(); // consume (
                     Node *params = NULL;
@@ -1554,6 +1574,7 @@ int main(int argc, char *argv[]) {
     int opt_s = 0;              // -s        : アセンブラのみ生成して終了（tzcc の既定動作。受理のみ）
     int opt_tizix = 0;         // --tizix-user / -T : 生成後に IY 相対 PIC へ変換
     int opt_x86 = 0;           // --march=x86 : x86-64 バックエンドで出力
+    int opt_ia16 = 0;          // --march=ia16 : x86 16bit(8086)バックエンドで出力 [PoC]
 
     for (int i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -1571,6 +1592,8 @@ int main(int argc, char *argv[]) {
             g_dupcheck_fatal = 1;   /* 関数間の同名ローカルはエラー扱い(#31) */
         } else if (strcmp(a, "--march=x86") == 0 || strcmp(a, "--x86") == 0) {
             opt_x86 = 1;
+        } else if (strcmp(a, "--march=ia16") == 0) {
+            opt_ia16 = 1;
         } else if (a[0] == '-' && a[1]) {
             fprintf(stderr, "warning: ignoring unknown option '%s'\n", a);
         } else {
@@ -1606,6 +1629,7 @@ int main(int argc, char *argv[]) {
     }
 
     g_intsz = opt_x86 ? 8 : 2;   // 構造体レイアウトのため
+    g_ia16 = opt_ia16;
     lexer_init(buffer);
     Node *ast = parse();
 
@@ -1616,7 +1640,8 @@ int main(int argc, char *argv[]) {
 
     // -X: アセンブラを標準出力へ出して終了
     if (opt_X && !opt_tizix) {
-        if (opt_x86) generate_x86(ast, stdout);
+        if (opt_ia16) generate_ia16(ast, stdout);
+        else if (opt_x86) generate_x86(ast, stdout);
         else         generate_asm(ast, stdout);
         free(buffer);
         return 0;
@@ -1653,7 +1678,8 @@ int main(int argc, char *argv[]) {
     // AST生成に加え、アセンブリ生成を実行
     FILE *asm_out = fopen(out_filename, "w");
     if (asm_out) {
-        if (opt_x86) generate_x86(ast, asm_out);
+        if (opt_ia16) generate_ia16(ast, asm_out);
+        else if (opt_x86) generate_x86(ast, asm_out);
         else         generate_asm(ast, asm_out);
         fclose(asm_out);
     } else {

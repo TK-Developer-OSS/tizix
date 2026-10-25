@@ -60,7 +60,8 @@ typedef enum {
     NODE_CONTINUE,
     NODE_SWITCH,       // left=式  right=本体(NODE_BLOCK, 中に NODE_CASE/DEFAULT/文)
     NODE_CASE,         // value=数値文字列（default は value=NULL）
-    NODE_DEFAULT
+    NODE_DEFAULT,
+    NODE_IA16_MOD      // %  (--march=ia16 only: DIV leaves the remainder in DX)
 } NodeType;
 
 typedef struct Node {

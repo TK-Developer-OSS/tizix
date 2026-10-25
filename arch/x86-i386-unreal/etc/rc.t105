@@ -1,0 +1,6 @@
+# T105: COM1=modem (Pi), console=screen
+sercon off
+echo rc: started
+ntpdate
+rsyslog rc-ok
+telnetd &

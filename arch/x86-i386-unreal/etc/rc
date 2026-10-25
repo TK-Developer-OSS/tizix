@@ -1,0 +1,5 @@
+# tizix startup (line<48B)
+echo rc: started
+ntpdate &
+# mcpd &
+rsyslog rc-ok

@@ -51,6 +51,7 @@ void print_ast(Node *node, int depth) {
         case NODE_SUB: type_name = "SUB"; break;
         case NODE_MUL: type_name = "MUL"; break;
         case NODE_DIV: type_name = "DIV"; break;
+        case NODE_IA16_MOD: type_name = "IA16_MOD"; break;
         case NODE_EQ: type_name = "EQ"; break;
         case NODE_NE: type_name = "NE"; break;
         case NODE_LT: type_name = "LT"; break;
