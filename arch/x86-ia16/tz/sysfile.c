@@ -116,6 +116,19 @@ void get_path(unsigned cseg, unsigned off)
     copy_abs(pathbuf, 0);
 }
 
+/* fn 18 / 23 / 24 carry a message, a command name and its argument: copied as they are, not resolved against the cwd */
+void get_raw(unsigned cseg, unsigned off)
+{
+    farcpy_in(pathbuf, cseg, off, PATHMAX);
+    pathbuf[PATHMAX - 1] = 0;
+}
+
+void get_raw2(unsigned cseg, unsigned off)
+{
+    farcpy_in(pathbuf2, cseg, off, PATHMAX);
+    pathbuf2[PATHMAX - 1] = 0;
+}
+
 void get_path2(unsigned cseg, unsigned off)
 {
     farcpy_in(pathbuf2, cseg, off, PATHMAX);
@@ -341,7 +354,7 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx, unsigned si, unsigned d
         return fsb_rename(pathbuf, pathbuf2);
     }
     if (fn == 18) {
-        get_path(cseg, si);
+        get_raw(cseg, si);
         klog_write(pathbuf);
         return 0;
     }
@@ -361,12 +374,12 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx, unsigned si, unsigned d
         return kexec_argv(pathbuf, pkbuf, al);
     }
     if (fn == 23) {
-        get_path(cseg, si);
-        get_path2(cseg, di);
+        get_raw(cseg, si);
+        get_raw2(cseg, di);
         return builtin_try(pathbuf, pathbuf2);
     }
     if (fn == 24) {
-        get_path(cseg, si);
+        get_raw(cseg, si);
         return builtin_is(pathbuf);
     }
     if (fn == 25) {
