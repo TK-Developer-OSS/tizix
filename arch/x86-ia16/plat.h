@@ -8,10 +8,12 @@
 /* SDCC の呼出規約属性は x86 では無意味 → 消す */
 /* プロセススロット(テーブル)の最大数。実際に使う数は起動時のメモリ量から決まる(x86_nslots)。
  * crt0.s へは Makefile が plat.h を読んで -Wa,--defsym,X86_N= で渡し、同じ式で KW_* を計算する。 */
+#ifndef X86_MAXSLOT
 #define X86_MAXSLOT 24
-/* スロットごとの syscall スタックの大きさ = 1<<X86_SCSTK_SHIFT バイト(9 → 512B)。使用量の実測は 300B 前後
+#endif
+/* スロットごとの syscall スタックの大きさ = 1<<X86_SCSTK_SHIFT バイト(10 → 1KB。9 = 512B だと外部シェルの krun_pipe 等で余裕が 92B まで下がったので 1KB に戻した)。使用量の実測は 420B 前後
  * (free の「syscall stack headroom」で最小の余りを見られる)。カーネルの 64KB セグメントに全スロット分を収める。 */
-#define X86_SCSTK_SHIFT 9
+#define X86_SCSTK_SHIFT 10
 
 #define __sdcccall(n)
 #define __z88dk_fastcall

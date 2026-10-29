@@ -23,6 +23,8 @@ _start:
 	jmp  short 1f             /* pseg:0x100 の先頭 4 バイト: jmp(2B) + __bss_end(2B)。kexec がファイルの
 	                          * 先頭 4 バイトから __bss_end を読み、必要なブロック数(bss+スタック込み)を決める */
 	.word __bss_end
+	.word __xwant             /* bytes wanted above the minimum (vi's text: the z80 "extra blocks", #38). kexec adds
+	                          * them when the pool has room, else gives the minimum. cmd.ld: 0 unless the link sets it */
 1:
 	mov  ax, offset __bss_start
 	mov  di, ax
@@ -44,7 +46,8 @@ _start:
 	push cx                  /* main 第1引数: argc(最後に積む → 一番近い =
 	                          ; 1番目の実引数。旧コードと同じ push 順) */
 	call main
-	/* 戻り値(AX)は捨てて exit */
+	/* 戻り値(AX)を exit の BX で渡す(カーネルが slot ごとに終了コードとして控える。syscall 52) */
+	mov  bx, ax
 
 _exit:
 	mov  ax, 0               /* AH=0 : exit syscall */

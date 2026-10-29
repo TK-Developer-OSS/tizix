@@ -11,7 +11,7 @@ def run_session(run_num):
 
     qemu_bin = "qemu-system-i386"
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    img_path = os.path.abspath(os.path.join(script_dir, "..", "disk", "floppy.img"))
+    img_path = os.path.abspath(os.environ.get("TIZIX_IMG") or os.path.join(script_dir, "..", "disk", "floppy.img"))
 
     fd, tmp_img_path = tempfile.mkstemp(suffix=".img")
     os.close(fd)

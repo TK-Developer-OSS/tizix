@@ -1,3 +1,7 @@
+#ifdef FAT12_MIN
+/* x86-ia16: FatFs 本体の代わりに最小の FAT12(arch/x86-ia16/fat12min.c)を使う。型と API は互換の部分集合。 */
+#include "../arch/x86-ia16/fat12min.h"
+#else
 /*----------------------------------------------------------------------------/
 /  FatFs - Generic FAT Filesystem module  R0.16                               /
 /-----------------------------------------------------------------------------/
@@ -446,3 +450,4 @@ void ff_mutex_give (int vol);		/* Unlock sync object */
 #endif
 
 #endif /* FF_DEFINED */
+#endif /* FAT12_MIN */

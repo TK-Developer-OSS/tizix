@@ -551,6 +551,43 @@ static unsigned char run_one(const char *cmd, const char *arg,
     return r;
 }
 
+#ifdef TZ_SYSCALL
+/* A | B | C ...: the kernel pipe joins one pair only, so a longer line runs stage after stage through two temporary files
+ * (the way a pipe with a builtin side does). stage = the first stage, next = the rest after its '|'. */
+static void run_chain(struct sh_state *S, char *stage, char *next)
+{
+    char *cmd, *arg, *out;
+    const char *in = 0;
+
+    for (;;) {
+        out = 0;
+        if (next)
+            out = (in && strcmp(in, "tmp.pip") == 0) ? "tmp2.pip" : "tmp.pip";
+        split_cmd_arg(stage, &cmd, &arg);
+        if (*cmd == 0 || prep_side(S, cmd, arg, S->argpack, sizeof S->argpack, &S->nargp) != 0) {
+            printf("sh: bad args\n");
+            break;
+        }
+        if (in && in_begin(in) != 0)
+            break;
+        if (out && redir_begin(out, 0) != 0) {
+            if (in) in_end();
+            break;
+        }
+        run_one(cmd, arg, S->argpack, S->nargp, ROUTE_CONSOLE, 0);
+        if (out) redir_end();
+        if (in) { in_end(); unlink(in); }
+        in = out;
+        if (!next)
+            return;
+        stage = next;
+        next = strchr(stage, '|');
+        if (next) { *next++ = 0; while (*next == ' ') next++; }
+    }
+    if (in) unlink(in);
+}
+#endif
+
 /* ================================================================== */
 /* 1 行分の実行(対話プロンプトと /etc/rc の両方から呼ぶ)                 */
 /*   S->line を破壊的にパースして起動する。戻り値は builtin_try 系の結果  */
@@ -578,6 +615,12 @@ static unsigned char dispatch_line(struct sh_state *S)
         while (*pipe_rhs == ' ') pipe_rhs++;
     }
 
+#ifdef TZ_SYSCALL
+    if (pipe_rhs && *pipe_rhs && strchr(pipe_rhs, '|')) {
+        run_chain(S, S->line, pipe_rhs);
+        return BUILTIN_NONE;
+    }
+#endif
     if (pipe_rhs && *pipe_rhs) {
         char *cmd2, *arg2;
 

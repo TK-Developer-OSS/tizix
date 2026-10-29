@@ -79,9 +79,14 @@ bios13_rw:
 	add  ah, 0x40            /* 2→42h(読み) / 3→43h(書き) */
 	xor  al, al
 	mov  dl, [bp+4]
+	push ds                  /* the BIOS reads the DAP at DS:SI, and the DAP is on the stack: DS = SS for the call
+	                          * (a syscall may run on the caller's stack, SS != DS) */
+	mov  cx, ss
+	mov  ds, cx
 	int  0x13
+	pop  ds
 	jc   .Lext_err
-	mov  ax, [si+8]          /* LBA 下位(si は DAP を指す) */
+	mov  ax, ss:[si+8]       /* LBA 下位(si は DAP を指す) */
 	add  sp, 16
 	mov  si, ax
 	jmp  .Lnext
@@ -93,7 +98,7 @@ bios13_rw:
 .Lchs:
 	mov  ax, si
 	xor  dx, dx
-	mov  cx, 18
+	mov  cx, FDD_SPT         /* Makefile の FDD= で決まる(ibm = 18、xt = 9) */
 	div  cx                  /* ax=track, dx=sector-1 */
 	mov  cl, dl
 	inc  cl                  /* CL = sector (1..18) */

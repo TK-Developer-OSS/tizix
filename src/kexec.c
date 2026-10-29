@@ -72,43 +72,70 @@ static void ps_note(unsigned char n, const char *fname,
 #endif
 
 #if defined(ARCH_X86_IA16)
-/* ---- x86-ia16: セグメント = プロセス基底(Z80 の block と同じ役回り)----
- *   従来メモリのうちカーネル(0x1000 セグメント、64KB)より上を 4KB ブロックのプールにし、
- *   プロセスは必要な連続ブロック数(.BIN 先頭の __bss_end + スタック 2KB から算出)だけ確保する。
- *   ブロック総数は起動時に測った従来メモリの量で決まる(固定の 64KB 枠 x 7 をやめた。#186)。
- *   プール先頭 = 0x2000 セグメント、1 ブロック = 0x100 パラグラフ(4KB)。
- *   プロセステーブル(スロット)は従来どおり 8 本(slot0 = カーネル/シェル)。ブロックの持ち主は
- *   pid[slot] != 0 のスロットの [x86_slot_seg, +x86_slot_blk) で決まるので、終了時に明示の解放は不要。
- *   .BIN は pseg:0x0100 (.COM流儀)、引数は pseg:0x0080、スタックは割り当て末尾。
- *   偽コンテキスト(crt0.s _isr08 の復帰 pop 列と一致):
- *     [es][ds][bp][di][si][dx][cx][bx][ax][IP][CS][FLAGS]  = 12 word
- *   初回進入: 全 GP=0, DS=ES=CS=pseg, IP=0x0100, FLAGS=0x0202(IF=1)。
+/* ---- x86-ia16: segment = process base (same role as a Z80 block) ----
+ *   Conventional memory outside the kernel (segment 0x1000, 64KB) is a pool of 4KB blocks; a process takes the number of
+ *   contiguous blocks it needs (from the .BIN header's __bss_end + 2KB of stack). The block count follows the amount of
+ *   conventional memory measured at boot (#186).
+ *   Pool order:
+ *     - low blocks, segments 0x0100 .. 0x0F00 (physical 0x1000..0xFFFF): the area stage1 (0x7C00) and stage2 (0x8000) used
+ *       to load the kernel. They are dead once the kernel runs; the IVT / BDA / boot info sit below 0x1000.
+ *       (Left unused, this is 60KB: the difference between a 128KB machine that boots the shell and one that cannot.)
+ *     - the kernel window (segments 0x1000..0x1F00) is skipped,
+ *     - blocks from segment 0x2000 up to the end of conventional memory.
+ *   A run of blocks must be contiguous, so an allocation never spans the gap after the last low block.
+ *   See arch/x86-ia16/BOOTMAP.md for the boot jumps and the physical memory map.
+ *   The process table (slots) stays at X86_MAXSLOT entries (slot0 = kernel/shell). A block belongs to the slot whose
+ *   [x86_slot_seg[slot], +x86_slot_blk[slot]) holds it while pid[slot] != 0, so nothing is freed explicitly on exit.
+ *   The .BIN is loaded at pseg:0x0100 (.COM style), arguments at pseg:0x0080, the stack at the end of the allocation.
+ *   Fake context (matches the pop sequence of _isr08 in crt0.s):
+ *     [es][ds][bp][di][si][dx][cx][bx][ax][IP][CS][FLAGS]  = 12 words
+ *   First entry: all GPRs 0, DS=ES=CS=pseg, IP=0x0100, FLAGS=0x0202 (IF=1).
  */
 extern void farcpy(unsigned dseg, unsigned doff, const void *src, unsigned n);
-extern unsigned x86_lowword(unsigned off);   /* arch/x86-ia16/sysfile.c: 0000:off の 1 語 */
+extern unsigned x86_lowword(unsigned off);   /* arch/x86-ia16/sysfile.c: one word at 0000:off */
 
-#define X86_NSLOT      x86_nslots()      /* 実際に使うスロット数(起動時のメモリ量から。最大 X86_MAXSLOT) */
+#define X86_NSLOT      x86_nslots()      /* slots actually used (from the memory size at boot; at most X86_MAXSLOT) */
 extern unsigned x86_nslots(void);
 #define X86_POOL_SEG   0x2000u
-#define X86_BLK_PARA   0x100u              /* 4KB = 0x100 パラグラフ */
-#define X86_STACK      0x800u              /* スタック最小 2KB */
+#define X86_BLK_PARA   0x100u              /* 4KB = 0x100 paragraphs */
+#define X86_POOL_LOW   15u                 /* low blocks: segments 0x0100 .. 0x0F00 */
+#define X86_STACK      0x800u              /* minimum stack 2KB */
 
-unsigned x86_slot_seg[X86_MAXSLOT] = { 0x1000 };   /* crt0.s が参照(スロットの cseg) */
-unsigned x86_slot_blk[X86_MAXSLOT];                 /* スロットのブロック数(0 = カーネル枠/未使用) */
+unsigned x86_slot_seg[X86_MAXSLOT] = { 0x1000 };   /* read by crt0.s (cseg of the slot) */
+unsigned x86_slot_blk[X86_MAXSLOT];                 /* blocks of the slot (0 = kernel slot / unused) */
 
-/* プールのブロック総数(従来メモリの終端から)。起動後に不変。 */
+/* segment of pool block p / pool block of a segment */
+static unsigned pool_seg(unsigned p)
+{
+	return p < X86_POOL_LOW ? (p + 1) * X86_BLK_PARA : X86_POOL_SEG + (p - X86_POOL_LOW) * X86_BLK_PARA;
+}
+static unsigned pool_idx(unsigned seg)
+{
+	return seg < 0x1000u ? seg / X86_BLK_PARA - 1 : X86_POOL_LOW + (seg - X86_POOL_SEG) / X86_BLK_PARA;
+}
+
+/* Number of blocks in the pool: the low blocks plus everything from segment 0x2000 to the end of conventional memory.
+ * Constant after boot. X86_MEMCAP_KB (a test knob, normally undefined) pretends the machine has less memory. */
 unsigned x86_pool_blocks(void)
 {
 	static unsigned total;
 	if (!total) {
 		unsigned kb = x86_lowword(0x512);
-		unsigned top = (unsigned)((kb ? kb : 640u) * 64u) & 0xFF00u;   /* 終端のパラグラフ(4KB 境界) */
-		total = top > X86_POOL_SEG ? (top - X86_POOL_SEG) / X86_BLK_PARA : 0;
+		unsigned top, low;
+		if (kb == 0)
+			kb = 640u;
+#ifdef X86_MEMCAP_KB
+		if (kb > X86_MEMCAP_KB)
+			kb = X86_MEMCAP_KB;
+#endif
+		top = (unsigned)(kb * 64u) & 0xFF00u;          /* end of memory as a 4KB-aligned paragraph */
+		low = top >= 0x1000u ? X86_POOL_LOW : (top > X86_BLK_PARA ? top / X86_BLK_PARA - 1 : 0);
+		total = low + (top > X86_POOL_SEG ? (top - X86_POOL_SEG) / X86_BLK_PARA : 0);
 	}
 	return total;
 }
 
-/* 生きているスロットが使っているブロック表(1 = 使用中)。 */
+/* 1 if block b belongs to a live slot. */
 static unsigned char blk_used(unsigned b)
 {
 	volatile unsigned char *pid = (volatile unsigned char *)KW_PIDTAB;
@@ -116,33 +143,37 @@ static unsigned char blk_used(unsigned b)
 	for (k = 1; k < X86_NSLOT; k++) {
 		if (pid[k] == 0 || x86_slot_blk[k] == 0)
 			continue;
-		s = (x86_slot_seg[k] - X86_POOL_SEG) / X86_BLK_PARA;
+		s = pool_idx(x86_slot_seg[k]);
 		if (b >= s && b < s + x86_slot_blk[k])
 			return 1;
 	}
 	return 0;
 }
 
-/* need 個の連続した空きブロックの先頭セグメント(first-fit)。無ければ 0。 */
+/* Segment of the first run of `need` contiguous free blocks (first fit); 0 if there is none. */
 static unsigned blk_alloc(unsigned need)
 {
 	unsigned total = x86_pool_blocks(), s, run = 0, b;
 	for (b = 0; b < total; b++) {
+		if (b == X86_POOL_LOW)
+			run = 0;                    /* the kernel window lies between the low blocks and block X86_POOL_LOW */
 		if (blk_used(b)) { run = 0; continue; }
 		run++;
 		if (run == need) {
 			s = b + 1 - need;
-			return X86_POOL_SEG + s * X86_BLK_PARA;
+			return pool_seg(s);
 		}
 	}
 	return 0;
 }
 
-/* free 用: sel 0=総数 1=使用中 2=空き 3=最大連続空き */
+/* for free: sel 0 = total, 1 = used, 2 = free, 3 = largest free run */
 unsigned x86_blkinfo(unsigned sel)
 {
 	unsigned total = x86_pool_blocks(), b, used = 0, run = 0, best = 0;
 	for (b = 0; b < total; b++) {
+		if (b == X86_POOL_LOW)
+			run = 0;                    /* not contiguous across the kernel window */
 		if (blk_used(b)) { used++; run = 0; }
 		else { run++; if (run > best) best = run; }
 	}
@@ -151,9 +182,9 @@ unsigned x86_blkinfo(unsigned sel)
 
 unsigned char kexec_file(const char *fname, const char *arg)
 {
-	/* 256B チャンク: FatFs の "整数セクタは user バッファへ直接 disk_read" 経路を
-	 * 避ける(x86 の INT 13h 読みでは win 以外のバッファ宛が不安定だった)。
-	 * 常に < 1 セクタ = win キャッシュ経由の memcpy になる。 */
+	/* 256-byte chunks: avoids the FatFs path that reads whole sectors straight into the user buffer
+	 * (INT 13h reads into any buffer other than win were unstable on x86). A chunk is always < 1 sector,
+	 * so the read goes through the win cache and a memcpy. */
 	static char bounce[256];
 	FIL fp;
 	UINT br;
@@ -172,18 +203,26 @@ unsigned char kexec_file(const char *fname, const char *arg)
 			break;
 	if (n >= X86_NSLOT) { f_close(&fp); return 0; }
 
-	/* 先頭 256B から __bss_end(ファイルの 2〜3 バイト目)を読み、必要なブロック数を決める */
+	/* Read __bss_end (bytes 2..3 of the file) from the first 256 bytes and size the allocation from it */
 	if (f_read(&fp, bounce, sizeof bounce, &br) != FR_OK || br < 4) { f_close(&fp); return 0xFF; }
 	{
 		unsigned bssend = (unsigned char)bounce[2] | ((unsigned)(unsigned char)bounce[3] << 8);
 		unsigned need;
-		if (bssend < 0x104 || bssend > 0xE000) bssend = 0xF000;   /* 不正なら従来どおり大きく */
+		if (bssend < 0x104 || bssend > 0xE000) bssend = 0xF000;   /* invalid: allocate a lot, as before */
 		need = (bssend + X86_STACK + 0xFFF) >> 12;
 		nblk = need;
-		pseg = blk_alloc(need);
-		if (!pseg) { f_close(&fp); return 0; }          /* 空きブロック無し */
+		pseg = 0;
+		{	/* header word 4..5 = __xwant (arch/x86-ia16/user/crt0cmd.s): bytes wanted above the minimum (vi's text) */
+			unsigned xw = (unsigned char)bounce[4] | ((unsigned)(unsigned char)bounce[5] << 8);
+			if (xw && br >= 6 && xw < 0x8000u) {
+				pseg = blk_alloc(need + ((xw + 0xFFFu) >> 12));
+				if (pseg) nblk = need + ((xw + 0xFFFu) >> 12);
+			}
+		}
+		if (!pseg) pseg = blk_alloc(need);
+		if (!pseg) { f_close(&fp); return 0; }          /* no free block */
 	}
-	/* 読んだ先頭チャンクを書いてから続きを読む */
+	/* write the first chunk, then read on */
 	farcpy(pseg, 0x0100, bounce, br);
 	off = 0x0100 + br;
 	for (;;) {
@@ -194,7 +233,7 @@ unsigned char kexec_file(const char *fname, const char *arg)
 	}
 	f_close(&fp);
 
-	/* 引数文字列 -> pseg:0x0080 */
+	/* argument string -> pseg:0x0080 */
 	{
 		char a[64];
 		i = 0;
@@ -204,7 +243,7 @@ unsigned char kexec_file(const char *fname, const char *arg)
 		farcpy(pseg, 0x0080, a, i + 1);
 	}
 
-	/* 偽コンテキスト -> pseg:(ブロック末尾 - 0x10 - 24) */
+	/* fake context -> pseg:(end of the allocation - 0x10 - 24) */
 	ctx[0] = pseg;      /* es */
 	ctx[1] = pseg;      /* ds */
 	ctx[2] = 0; ctx[3] = 0; ctx[4] = 0; ctx[5] = 0;
@@ -215,21 +254,20 @@ unsigned char kexec_file(const char *fname, const char *arg)
 	csp = (nblk << 12) - 0x10 - sizeof ctx;
 	farcpy(pseg, csp, ctx, sizeof ctx);
 
-	/* 順序: SP/SS を先に書いてから pid を立てる(pid が先だと、その間に PIT 割り込みが
-	 * 入った場合 _isr08 が古い sp/ss の slot へ切り替えて壊れる)。 */
+	/* Order: write SP/SS first, then set the pid (if the pid came first and the PIT fired in between,
+	 * _isr08 would switch to the slot with its old sp/ss and break). */
 	x86_slot_seg[n] = pseg;
 	x86_slot_blk[n] = nblk;
 	spt[n] = csp;
-	sst[n] = pseg;          /* ss_tbl[n] = プロセスセグメント */
+	sst[n] = pseg;          /* ss_tbl[n] = process segment */
 	__asm__ volatile ("" ::: "memory");
 	pid[n] = (unsigned char)n;
 	return (unsigned char)n;
 }
 
-/* #48: src/sh.c は全アーキで kexec_argv を呼ぶ。x86 のユーザー側 crt0 は
- * 生文字列 1 本を argv_init.c で空白区切りに割り直す作りのままなので、ここで
- * トークンを空白で繋いで従来の kexec_file へ渡す(引用符内の空白は保たれない。
- * x86-ia16 は #77 で当面リリース対象外)。 */
+/* #48: src/sh.c calls kexec_argv on every arch. The x86 user-side crt0 still splits one raw string into
+ * words in argv_init.c, so the tokens are joined with spaces here and handed to kexec_file as before
+ * (spaces inside quotes are not preserved; x86-ia16 is outside the release for now, #77). */
 unsigned char kexec_argv(const char *fname, const char *argpack, unsigned char argc)
 {
 	static char joined[128];
@@ -244,7 +282,7 @@ unsigned char kexec_argv(const char *fname, const char *argpack, unsigned char a
 				joined[o++] = *argpack;
 			argpack++;
 		}
-		argpack++;                            /* NUL を越えて次のトークンへ */
+		argpack++;                            /* step over the NUL to the next token */
 	}
 	joined[o] = 0;
 	return kexec_file(fname, joined);
@@ -252,7 +290,7 @@ unsigned char kexec_argv(const char *fname, const char *argpack, unsigned char a
 
 unsigned char kload_driver(void)
 {
-	return 0;      /* x86 に常駐 DRIVER は無い(コマンドは int 0x80 で直接) */
+	return 0;      /* x86 has no resident DRIVER (commands use int 0x80 directly) */
 }
 #elif defined(PLAT_FLAT32)
 /* ---- PLAT_FLAT32(m68k-mega / esp32-wroom-32e …): スロット方式、全ポート共通 ----

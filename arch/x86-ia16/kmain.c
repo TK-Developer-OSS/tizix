@@ -45,6 +45,28 @@ static void put_ul(unsigned long v)
 
 /* 起動の順序(#186): メモリ量(従来 + 拡張、BIOS が報告する値)→ 使えるメモリからスロット数を決める。
  * 拡張メモリ(1MB 超)は 8086 のリアルモードからは使えないので、ここでは量を表示するだけ。 */
+/* カーネル本体(slot 0 = シェル/init)のスタックの使用量。bss の終わり(__bss_end)から 0xFFFE までがスタック領域で、
+ * 起動時に今の SP の手前までをパターンで埋め、底から連続して残るパターンの長さ = 余裕(free が表示)。
+ * カーネルの 64KB セグメントはほぼ満杯なので、機能を足したあとの余裕を見張る。 */
+extern unsigned char __bss_end[];
+static unsigned char *kstk_lo;
+static void kstk_fill(void)
+{
+	unsigned char *sp, *p;
+	__asm__ volatile ("mov %%sp, %0" : "=r"(sp));
+	kstk_lo = __bss_end;
+	for (p = kstk_lo; p + 96 < sp; p++)
+		*p = 0xA5;
+}
+unsigned x86_kstack_headroom(void)
+{
+	unsigned i = 0;
+	const unsigned char *p = kstk_lo;
+	while (p[i] == 0xA5 && (unsigned)(p + i) < 0xFF00u)
+		i++;
+	return i;
+}
+
 void kmain(void)
 {
 	unsigned ext_lo, ext_hi;
@@ -52,6 +74,7 @@ void kmain(void)
 
 	con_init();
 	scstk_fill();
+	kstk_fill();
 
 	ext_lo = x86_lowword(0x516);            /* E801: 1〜16MB の KB */
 	ext_hi = x86_lowword(0x518);            /* E801: 16MB 超の 64KB 単位 */

@@ -53,7 +53,7 @@ static struct kdir kd_state;
  *   x86-ia16 は builtin シェル(src/sh.c)が自前の cwd と resolve_arg を持ち、
  *   絶対パスで降りてくる。KW_CWD も未定義なので丸ごと除外する。
  * ================================================================== */
-#if !defined(ARCH_X86_IA16)
+#if !defined(ARCH_X86_IA16) || defined(X86_EXTSH)
 
 #define KCWD  ((char *)KW_CWD)
 
@@ -173,7 +173,7 @@ void kpath_init(void)
 
 int fat_init(void)
 {
-#if !defined(ARCH_X86_IA16)
+#if !defined(ARCH_X86_IA16) || defined(X86_EXTSH)
     KD->inuse = 0;                          /* RAM ゴミ対策(builtin_init で 1 回)*/
     kpath_init();                           /* cwd = "/root" (BSS 非クリア対策) */
 #endif
@@ -211,7 +211,7 @@ int fat_isdir(const char *path)
  * カーネル BSS(FATFS fs の後ろ)。FatFs 共有窓 win[512] とは非重複。 */
 static FILINFO kdir_fno;
 
-#if !defined(ARCH_X86_IA16)
+#if !defined(ARCH_X86_IA16) || defined(X86_EXTSH)
 /* cwd 起点で解決してから開く(コマンドから来る通常の入口)。
  * cwd をカーネルが持つのは z80 だけ(kpath)。 */
 int kdir_open(const char *path) __sdcccall(0)   /* 0=ok / -1=失敗 */
@@ -321,7 +321,7 @@ void kdir_close(void) __sdcccall(0)
 
 /* x86-ia16 は builtin シェルが絶対パスで降りてくるので解決は不要。
  * KW_PATH* も未定義なので素通しにする。 */
-#if !defined(ARCH_X86_IA16)
+#if !defined(ARCH_X86_IA16) || defined(X86_EXTSH)
 #define KPATH1(p)  kpath((p), 0)
 #define KPATH2(p)  kpath((p), 1)
 #else

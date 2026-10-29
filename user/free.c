@@ -163,6 +163,8 @@ int main(int argc, char **argv)
         putchar('\n');
         prs("syscall stack headroom ");
         prnuml(syscall5(53, 10, 0, 0, 0));
+        prs("B, kernel stack headroom ");
+        prnuml(syscall5(53, 11, 0, 0, 0));
         prs("B\n");
 #endif
         return 0;

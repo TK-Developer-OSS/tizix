@@ -487,6 +487,10 @@ extern unsigned char kwork[];            /* 実体は src/kernel.c(大きさ X86
 #define KW_LSDIR      (KW_BASE + X86_EXT_OFF + 24 * X86_N)          /* struct kdir(~44B → 48B 確保) */
 #define KW_CWD        (KW_BASE + X86_EXT_OFF + 24 * X86_N + 48)     /* cwd(48B) */
 #define KW_PATHS      (KW_BASE + X86_EXT_OFF + 24 * X86_N + 96)     /* N × 2 枠 × 48B */
+#define KW_CWD_MAX     48                                            /* cwd の最大長(NUL 込み) */
+#define KW_PATH_SLOTS  2
+#define KW_PATH_MAX    48
+#define KW_PATH_STRIDE (KW_PATH_MAX * KW_PATH_SLOTS)
 #define X86_KWORK_SIZE (X86_EXT_OFF + 120 * X86_N + 96)
 
 #endif /* ARCH_X86_IA16 */

@@ -5,7 +5,7 @@
 #include "kmem.h"
 #include "fatcmd.h"     /* klog_write: 起動文言を /var/log/message へも記録 */
 
-#if defined(ARCH_X86_IA16)
+#if defined(ARCH_X86_IA16) && !defined(X86_EXTSH)
 #include "sh.h"
 #else
 #include "kexec.h"
@@ -25,7 +25,7 @@ void init(void)
 {
     kernel_init();
 
-#if defined(ARCH_X86_IA16)
+#if defined(ARCH_X86_IA16) && !defined(X86_EXTSH)
     /* x86: sh はカーネル常駐(共有 src/sh.c 直呼び)。z80 / m68k-mega と違い
      * /bin/sh.bin へは外に出ていないが、**起動の骨格は z80 分岐と同じ順序に
      * 揃えてある** ── builtin_init()(FAT mount + vfs_init)→ バナー →

@@ -18,7 +18,12 @@
 	.global sc_stack
 
 PIT_DIV   = 11932           /* 1193182 / 100 */
+/* Kernel segment. Makefile.tz passes KSEG_DEF (0x0100: the kernel at physical 0x1000, its stack below it). */
+.ifdef KSEG_DEF
+KSEG      = KSEG_DEF
+.else
 KSEG      = 0x1000
+.endif
 /* kwork 内のオフセット(src/kmem.h の x86 節と同じ式。X86_N は Makefile が plat.h の X86_MAXSLOT から渡す) */
 KW_SP     = X86_N
 KW_CUR    = 3 * X86_N
@@ -29,8 +34,13 @@ _start:
 	mov  ax, cs
 	mov  ds, ax
 	mov  es, ax
+.ifdef KSTK_LOW
+	xor  ax, ax                     /* the kernel stack is in segment 0, below the kernel (link-kernel.ld: KSTK_TOP) */
 	mov  ss, ax
-	mov  sp, 0xfffe
+.else
+	mov  ss, ax
+.endif
+	mov  sp, offset __kstack_top    /* link-kernel.ld: 0xFFFE, or KSTK_TOP (low memory) when KSTK_LOW */
 	cld
 
 	/* ---- IVT: INT 08h -> _isr08, INT 80h -> _isr80 (IVT はセグメント0) ---- */
@@ -105,6 +115,10 @@ _isr08:
 
 	/* round-robin: current を進め、pid_tbl!=0 の slot を探す */
 	mov  al, [kwork + KW_CUR]
+.ifdef KSTK_LOW
+	cmp  byte ptr [kpreempt], 0   /* inside the file system (glue.S fs_tramp): tick only, no switch */
+	jne  rr_stay
+.endif
 rr_lp:
 	inc  al
 	cmp  al, byte ptr [x86_nslot_rt]   /* 実際に使うスロット数(起動時に kmain が設定) */
@@ -116,6 +130,7 @@ rr_chk:
 	cmp  byte ptr [kwork + bx], 0
 	je   rr_lp                 /* free -> skip */
 	mov  [kwork + KW_CUR], al    /* current = al */
+rr_stay:
 
 	/* 復帰: SS/SP = ss_tbl[current] / sp_tbl[current] */
 	mov  bl, al
@@ -167,6 +182,39 @@ _isr80:
 	mov  ax, [bp+16]
 	test ah, ah
 	jz   sc_exit              /* AH=0 : exit(SS 切替不要) */
+
+.ifdef SC_PSTACK
+	/* The kernel C runs on the caller's stack, as on the z80 (tzcc kernel, Makefile.tz): only DS / ES change to
+	 * the kernel, SS:SP stays the process's. No syscall stack per slot; a syscall that waits keeps its frame on
+	 * its own process stack, and _isr08 saves that SS:SP like any other context. tzcc addresses locals through
+	 * BP (= SS) and globals through DS, and reports a local's address escaping into a DS pointer (none in tz/). */
+	mov  ax, KSEG
+	mov  es, ax
+	mov  bl, [kwork + KW_CUR]
+	xor  bh, bh
+	shl  bx, 1
+	push word ptr [x86_slot_seg + bx]   /* cseg: the caller's segment */
+	push word ptr [bp+6]                /* di */
+	push word ptr [bp+8]                /* si */
+	push word ptr [bp+12]               /* cx */
+	push word ptr [bp+14]               /* bx */
+	push word ptr [bp+16]               /* ax */
+	call sys_call
+	add  sp, 12
+	cli
+	mov  bp, sp               /* back at the frame (sys_call may have waited and been switched away from) */
+	mov  [bp+16], ax          /* 戻り値 -> 呼び出し側 AX(SS 相対) */
+	pop  es
+	pop  ds
+	pop  bp
+	pop  di
+	pop  si
+	pop  dx
+	pop  cx
+	pop  bx
+	pop  ax
+	iret
+.endif
 
 	/* --- 呼び出し元 SS:frame と syscall 引数を kernel globals へ --- */
 .if PERSLOT
@@ -267,6 +315,8 @@ sc_exit:
 	cli
 	mov  bl, [kwork + KW_CUR]
 	xor  bh, bh
+	mov  dx, [bp+14]                /* 呼び出し元の BX = 終了コード(crt0cmd が main の戻り値を載せる) */
+	mov  byte ptr [x86_exitcode + bx], dl
 	mov  byte ptr [kwork + bx], 0   /* pid_tbl[current] = 0 (free) */
 	/* 次を pick して復帰(退避はしない = 死んだ文脈)。_isr08 の pick を再利用。 */
 	mov  al, [kwork + KW_CUR]
@@ -275,8 +325,10 @@ sc_exit:
 /* ---- _isr80 用 kernel syscall スタック + 退避 globals(.bss = 起動時ゼロ)---- */
 	.data
 	.global x86_nslot_rt
+	.global x86_exitcode
 x86_nslot_rt: .byte 1            /* 使うスロット数(スケジューラの巡回範囲)。kmain が x86_nslots() に更新 */
 	.section .bss
+x86_exitcode: .space X86_N       /* スロットごとの終了コード(main の戻り値。kill は 130)。syscall 52 */
 	.align 2
 .if PERSLOT
 sc_css:   .space 2 * X86_N   /* スロットごとの退避 SS / SP */
@@ -292,7 +344,9 @@ sc_si:    .space 2
 sc_di:    .space 2
 sc_cseg:  .space 2
 sc_ret:   .space 2
-.if PERSLOT
+.ifdef SC_PSTACK
+sc_stack:                     /* none: syscalls run on the caller's stack */
+.elseif PERSLOT
 sc_stack: .space (1 << SCSTK_SHIFT) * X86_N   /* スロットごと(plat.h の X86_SCSTK_SHIFT) */
 .else
 sc_stack: .space 1024

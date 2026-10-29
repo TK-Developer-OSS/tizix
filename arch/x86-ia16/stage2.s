@@ -18,7 +18,11 @@
 
 	.include "_layout.inc"   /* KERNEL_SECS(Makefile が kernel.bin から生成) */
 
+.ifdef KSEG_DEF
+KSEG       = KSEG_DEF   /* Makefile.tz: the kernel from physical 0x600 */
+.else
 KSEG       = 0x1000
+.endif
 KERNEL_LBA = 9          /* = STAGE2_LBA(1) + STAGE2_SECS(8) */
 COM1       = 0x3F8      /* 16550: 出力は INT 10h でなく COM1 直叩き
                          * (QEMU では INT 10h は VGA に出て -serial に来ない) */
@@ -32,6 +36,38 @@ _s2:
 	mov  ss, ax
 	mov  sp, 0x7c00
 	cld
+.ifdef S2_RELOC
+	/* Move out of the way first (as early Linux's bootsect does): copy these 4KB to the last 4KB block of
+	 * conventional memory and run there, so that a kernel loaded at physical 0x600 may grow past 0x8000.
+	 * S2_MEMCAP (KB, 0 = off) caps the memory size the same way MEMCAP_KB does in the kernel. */
+	int  0x12               /* AX = KB of conventional memory */
+.if S2_MEMCAP
+	cmp  ax, S2_MEMCAP
+	jbe  1f
+	mov  ax, S2_MEMCAP
+1:
+.endif
+	mov  cl, 6
+	shl  ax, cl             /* segment of the end of memory */
+	and  ax, 0xFF00         /* 4KB aligned */
+	sub  ax, 0x0100         /* the last 4KB block */
+	mov  es, ax
+	xor  si, si
+	xor  di, di
+	mov  cx, 2048           /* 4KB = the 8 sectors stage1 loaded */
+	rep  movsw              /* DS(cs):0 -> ES:0 */
+	mov  bx, offset s2_high
+	push es
+	push bx
+	retf
+s2_high:
+	mov  ax, cs
+	mov  ds, ax
+	mov  ss, ax
+	mov  sp, 0x1000         /* the stack at the top of the same 4KB */
+	xor  ax, ax
+	mov  es, ax
+.endif
 	mov  [drive], dl
 
 	call uart_init
@@ -196,7 +232,7 @@ dap_lba: .long 0, 0
 tries:  .byte 4
 lba:    .word 0
 bufoff: .word 0
-spt:    .word 18
+spt:    .word FDD_SPT           /* 1 トラックのセクタ数(Makefile の FDD= で決まる。ibm = 18) */
 msg_banner: .asciz "tizix stage2\r\n"
 msg_go:     .asciz "stage2: entering kernel\r\n"
 msg_err:    .asciz "stage2: kernel load error\r\n"

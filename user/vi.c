@@ -119,6 +119,11 @@ static int  pending;        /* getkey の 1 文字戻しバッファ。-1=無し
 static char *ubase;         /* 記録領域の先頭 */
 static char *urec;          /* 次に積む段 */
 static unsigned char ucnt;  /* 積まれている段数 */
+/* VI_UNDO_OPT: undo only when the text area has room for it (decided once in vi_init). x86-ia16 sets it: its text
+ * is the rest of vi's own blocks, a little over 1KB on a 64KB machine, where the 272B record would not pay. */
+#ifdef VI_UNDO_OPT
+static unsigned char uon;   /* 1 = undo is on */
+#endif
 static int  ins_org;        /* 挿入を始めた位置 */
 static int  ins_tl;         /* 挿入を始めたときの tlen */
 static unsigned char ins_ok;/* 1 = この挿入は ins_org からの純粋な追加 */
@@ -425,6 +430,9 @@ static void yank_line(void)
 /* 1 段積む。kind 1 なら text[upos..upos+ulen) を記録に写す。 */
 static void urecord(unsigned char ur_kind, int ur_pos, int ur_len)
 {
+#ifdef VI_UNDO_OPT
+    if (!uon) return;
+#endif
     if (ur_len == 0) return;                /* 何も変わっていない */
     if (ur_len > UMAXLEN) {                 /* 戻しきれない = 履歴ごと捨てる */
         ucnt = 0;
@@ -451,6 +459,9 @@ static void do_undo(void)
     int ud_pos;
     int ud_len;
 
+#ifdef VI_UNDO_OPT
+    if (!uon) return;
+#endif
     if (ucnt == 0) return;
     if (urec == ubase) urec = ubase + ULAST;
     else urec = urec - USTRIDE;
@@ -924,7 +935,14 @@ static int vi_init(int vn_argc, char **vn_argv)
     tmax = tmax - VI_STACK_RESERVE;
     /* undo の記録は本文バッファの直上(追加ブロック内)に置く。
      * 像(3 ブロック)を 1 バイトも食わないため。本文は 2560 -> 2288B。 */
+#ifdef VI_UNDO_OPT
+    if (tmax >= 2048 + UTOTAL) {        /* room enough: undo on */
+        uon = 1;
+        tmax = tmax - UTOTAL;
+    }
+#else
     tmax = tmax - UTOTAL;
+#endif
     ubase = text + tmax;
     urec = ubase;
     /* 下限チェックは置かない。追加ブロックは 4096B 固定(XBLK=1)なので

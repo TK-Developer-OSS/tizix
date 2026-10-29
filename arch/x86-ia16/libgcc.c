@@ -83,3 +83,40 @@ long __modsi3(long a, long b)
 	udivmod((U32)(a < 0 ? -a : a), (U32)(b < 0 ? -b : b), &q, &r);
 	return (a < 0) ? -(long)r : (long)r;
 }
+
+/* 32bit シフト(fat12min.c が DWORD の >> 9 などで使う)。ia16-gcc は libgcc.a が無いので自前。
+ *   16bit 命令だけで 1 ビットずつ(n は小さい)。 */
+U32 __lshrsi3(U32 a, int n)
+{
+	union u32u v;
+	v.v = a;
+	while (n-- > 0) {
+		v.h.lo = (U16)((v.h.lo >> 1) | ((v.h.hi & 1) ? 0x8000u : 0));
+		v.h.hi = (U16)(v.h.hi >> 1);
+	}
+	return v.v;
+}
+
+U32 __ashlsi3(U32 a, int n)
+{
+	union u32u v;
+	v.v = a;
+	while (n-- > 0) {
+		v.h.hi = (U16)((v.h.hi << 1) | ((v.h.lo & 0x8000u) ? 1 : 0));
+		v.h.lo = (U16)(v.h.lo << 1);
+	}
+	return v.v;
+}
+
+U32 __ashrsi3(U32 a, int n)
+{
+	union u32u v;
+	U16 sign;
+	v.v = a;
+	sign = (U16)(v.h.hi & 0x8000u);
+	while (n-- > 0) {
+		v.h.lo = (U16)((v.h.lo >> 1) | ((v.h.hi & 1) ? 0x8000u : 0));
+		v.h.hi = (U16)((v.h.hi >> 1) | sign);
+	}
+	return v.v;
+}

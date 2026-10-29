@@ -30,6 +30,7 @@
 #include "kmem.h"       /* KW_TICKS */
 #include "pipe.h"       /* pipe_tail(case 21) */
 #include "vfs.h"
+#include "builtin.h"   /* builtin_try / builtin_is(mcpd の run) */
 #include "fatcmd.h"   /* klog_write(case 18) */        /* vfs_resolve : パス系入口の backend 振り分け */
 #include "dev.h"        /* DEVFS ノードの dev_ops 経由ディスパッチ(/dev/null,/dev/fda 共通) */
 
@@ -49,6 +50,7 @@ static const struct dev_ops *ufd_ops[NUFD];
 static unsigned seek_hi = 0;
 
 extern int con_rx_ready(void);   /* console.c(同アーキ内)。物理層の RX-ready */
+extern int con_pending(void);    /* src/io.c: 戻しバッファに 1 バイトあるか */
 
 static int con_raw_flag;
 
@@ -56,6 +58,44 @@ static char pathbuf[PATHMAX];
 static char pathbuf2[PATHMAX];
 static char iobuf[IOCHUNK];
 static char namebuf[13];
+static void x86_proc_release(unsigned char n)   /* src/kernel.c の proc_release は PLAT_FLAT32 専用なので、ここに同じものを持つ */
+{
+	extern unsigned char kwork[];
+	extern unsigned x86_nslots(void);
+	volatile unsigned char *pid = (volatile unsigned char *)kwork;
+	unsigned ns = x86_nslots();
+	if (n == 0 || n >= ns)
+		return;
+	pid[n] = 0;
+	while (++n < ns && pid[n] == PID_CONT)
+		pid[n] = 0;
+}
+static char pkbuf[160];          /* syscall 22 / 29 の引数パック(NUL 区切りの語 + 終端 NUL。sh の argpack は 144B まで) */
+static char pkbuf2[104];         /* syscall 29(krun_pipe)の左辺の引数パック(sh の argpackL は 96B まで) */
+extern unsigned char x86_exitcode[];   /* crt0.s: スロットごとの終了コード */
+extern unsigned char kexec_argv(const char *fname, const char *argpack, unsigned char argc);
+extern int builtin_is(const char *cmd);
+extern unsigned char krun_pipe(const char *ln, const char *lp, unsigned char lc,
+                               const char *rn, const char *rp, unsigned char rc);
+extern int con_break(void);
+extern void kgetcwd(char *out);
+extern int kchdir(const char *path);
+
+#ifdef X86_EXTSH
+/* 外部シェル(/bin/sh.bin)は引数を解釈せずに渡すので、相対パスはカーネルが cwd 起点で絶対化する(src/fatcmd.c の kpath。
+ *   他の gcc 系ポートと同じ)。結果は実行中スロット専用の枠に入るので、pathbuf / pathbuf2 へ写し直す。 */
+extern const char *kpath(const char *in, unsigned char slot);
+static void abs_into(char *buf, unsigned char slot)
+{
+	const char *r = kpath(buf, slot);
+	unsigned i;
+	if (r != buf) {
+		for (i = 0; i < PATHMAX - 1 && r[i]; i++)
+			buf[i] = r[i];
+		buf[i] = 0;
+	}
+}
+#endif
 
 static void get_path(unsigned cseg, unsigned off)
 {
@@ -63,8 +103,12 @@ static void get_path(unsigned cseg, unsigned off)
 	farcpy_in(pathbuf, cseg, off, PATHMAX);
 	for (i = 0; i < PATHMAX; i++)
 		if (pathbuf[i] == 0)
-			return;
-	pathbuf[PATHMAX - 1] = 0;
+			break;
+	if (i == PATHMAX)
+		pathbuf[PATHMAX - 1] = 0;
+#ifdef X86_EXTSH
+	abs_into(pathbuf, 0);
+#endif
 }
 
 static void get_path2(unsigned cseg, unsigned off)
@@ -73,8 +117,12 @@ static void get_path2(unsigned cseg, unsigned off)
 	farcpy_in(pathbuf2, cseg, off, PATHMAX);
 	for (i = 0; i < PATHMAX; i++)
 		if (pathbuf2[i] == 0)
-			return;
-	pathbuf2[PATHMAX - 1] = 0;
+			break;
+	if (i == PATHMAX)
+		pathbuf2[PATHMAX - 1] = 0;
+#ifdef X86_EXTSH
+	abs_into(pathbuf2, 1);
+#endif
 }
 
 extern unsigned char kwork[];   /* crt0.s: pid_tbl[0..7] を先頭に持つ */
@@ -98,6 +146,7 @@ unsigned x86_lowword(unsigned off)
 extern unsigned x86_blkinfo(unsigned sel);
 extern unsigned x86_pool_blocks(void);
 extern unsigned x86_scstk_headroom(void);
+extern unsigned x86_kstack_headroom(void);
 
 unsigned x86_nslots(void)
 {
@@ -134,10 +183,18 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
 		 * (IF=1 になって別プロセスへ切り替わり、単一の sc_stack が衝突する)。tick を直接読む。 */
 		return *(volatile unsigned int *)KW_TICKS;
 	case 16:
-		return (unsigned)time_get();
+		return (unsigned)time_get();          /* 下位 16 ビット。上位は 55 */
+	case 55:
+		return (unsigned)(time_get() >> 16);  /* time_get の上位 16 ビット(syscall の戻りは 16 ビット) */
+	case 54:
+		/* time_set(sec): 下位 = bx、上位 = cx。ntpdate / sntp が使う */
+		time_set(((unsigned long)cx << 16) | (unsigned long)bx);
+		return 0;
 	case 17:
 		/* input_ready */
-		return (unsigned)(con_rx_ready() ? 1 : 0);
+		/* con_break(外部シェルの前景待ち)が Ctrl+C の確認で取り出した 1 文字は io.c の戻しバッファ(con_ung)に
+		 * 入っているので、そちらも見る(見ないと kbhit が偽になり、入力が次の 1 文字まで遅れる)。 */
+		return (unsigned)((con_rx_ready() || con_pending()) ? 1 : 0);
 	case 35:
 		/* con_raw(on) */
 		con_raw_flag = (int)al;
@@ -340,6 +397,8 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
 			return x86_nslots();
 		if (al >= 6 && al <= 9)
 			return x86_blkinfo(al - 6);   /* 6=ブロック総数 7=使用中 8=空き 9=最大連続空き(4KB 単位) */
+		if (al == 11)
+			return x86_kstack_headroom();     /* カーネル本体スタックの最小余裕(バイト。0 = 底まで使った) */
 		if (al == 10)
 			return x86_scstk_headroom();  /* 全スロットの syscall スタックの最小余裕(バイト) */
 		return al < 4 ? x86_lowword(0x512 + 2 * al) : 0xFFFF;
@@ -406,6 +465,83 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx,
 	case 19:
 		return (unsigned)kfs_df(al);
 
+	/* ---- 22〜28 / 33 / 51 / 52: mcpd(MCP サーバ)が使う、外部コマンドの起動・出力の取り込み・終了待ち。
+		 *   番号と意味は src/sysfile.c(gcc 系)と同じ。引数は x86 の流儀(al = 小さい数、si/di = ユーザーのポインタ)。---- */
+	case 22:
+		/* kexec_argv(fn, pack, argc): al = argc、si = ファイル名、di = 引数パック。戻り: スロット(0xFF = 無い / 0 = 空き無し) */
+		get_path(cseg, si);
+		farcpy_in(pkbuf, cseg, di, sizeof pkbuf);
+		pkbuf[sizeof pkbuf - 1] = 0;
+		return kexec_argv(pathbuf, pkbuf, (unsigned char)al);
+	case 23:
+		/* builtin_try(cmd, arg): si = コマンド名、di = 引数文字列(64 文字まで) */
+		get_path(cseg, si);
+		get_path2(cseg, di);
+		return (unsigned)builtin_try(pathbuf, pathbuf2);
+	case 24:
+		get_path(cseg, si);
+		return (unsigned)builtin_is(pathbuf);
+	case 25:
+		/* redir_begin(fname, append): al = append、si = ファイル名 */
+		get_path(cseg, si);
+		return (unsigned)redir_begin(pathbuf, (unsigned char)al);
+	case 26:
+		redir_end();
+		return 0;
+	case 27:
+		get_path(cseg, si);
+		return (unsigned)in_begin(pathbuf);
+	case 28:
+		in_end();
+		return 0;
+	case 29: {
+		/* krun_pipe(ln, lp, lc, rn, rp, rc): si = ユーザー側の 6 語の配列 { ln, lp, lc, rn, rp, rc }(ポインタは near)。
+		 *   A | B の両側が終わるまでここで待つ(スロット別 syscall スタックなので KYIELD できる)。 */
+		unsigned a[6];
+		farcpy_in(a, cseg, si, sizeof a);
+		farcpy_in(pathbuf, cseg, a[0], PATHMAX);  pathbuf[PATHMAX - 1] = 0;
+		farcpy_in(pathbuf2, cseg, a[3], PATHMAX); pathbuf2[PATHMAX - 1] = 0;
+		farcpy_in(pkbuf2, cseg, a[1], sizeof pkbuf2); pkbuf2[sizeof pkbuf2 - 1] = 0;
+		farcpy_in(pkbuf, cseg, a[4], sizeof pkbuf);   pkbuf[sizeof pkbuf - 1] = 0;
+		return krun_pipe(pathbuf, pkbuf2, (unsigned char)a[2], pathbuf2, pkbuf, (unsigned char)a[5]);
+	}
+	case 30:
+		get_path(cseg, si);
+		return (unsigned)kchdir(pathbuf);
+	case 31: {
+		/* kgetcwd(out): di = ユーザー側の受け取り(49 バイト) */
+		char cw[56];
+		kgetcwd(cw);
+		cw[sizeof cw - 1] = 0;
+		farcpy(cseg, di, cw, 49);
+		return 0;
+	}
+	case 32:
+		return (unsigned)(con_break() ? 1 : 0);
+	case 34:
+		/* route(n, r): 出力ルート表(n 番のスロットの出力先)。al = n、bx = r */
+		if (al < x86_nslots())
+			((volatile unsigned char *)KW_OUTROUTE)[al] = (unsigned char)bx;
+		return 0;
+	case 33:
+		/* kill(n): 前景の Ctrl+C 相当。終了コードは 130 */
+		if (al >= 1 && al < x86_nslots() && ((volatile unsigned char *)kwork)[al] != PID_CONT) {
+			x86_exitcode[al] = 130;
+			x86_proc_release((unsigned char)al);
+		}
+		return 0;
+	case 51: {
+		/* ksleep(ticks): al tick(1/100 秒)眠る。スロット別 syscall スタックなので KYIELD できる */
+		unsigned t0 = *(volatile unsigned int *)KW_TICKS;
+		while ((unsigned)(*(volatile unsigned int *)KW_TICKS - t0) < al)
+			KYIELD();
+		return 0;
+	}
+	case 52:
+		/* exitcode(n): スロット n で最後に終わったプロセスの終了コード(main の戻り値。kill は 130) */
+		if (al >= x86_nslots())
+			return 0xFFFF;
+		return x86_exitcode[al];
 	case 20:
 		/* slot(n): pid 表(crt0.s の kwork[0..7])の n 番。0=空き、それ以外=占有。
 		 * n が実行時スロット数以上なら 0xFFFF(ユーザ側の syscall5 が 0xFFFFFFFF に伸ばす。/bin/free の終端)。 */

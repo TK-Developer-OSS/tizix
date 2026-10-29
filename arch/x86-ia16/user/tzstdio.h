@@ -32,6 +32,9 @@
 
 #define TZ_SYSCALL 1
 
+/* str 系・mem 系のプロトタイプ(実体は src/libc/libc.c = libc.o。共有コマンドの curl などが strchr 等を使う) */
+#include <string.h>
+
 #ifndef __sdcccall
 #define __sdcccall(x)
 #endif
@@ -44,6 +47,9 @@
 #define SEEK_CUR 1
 #define SEEK_END 2
 #define FS_DENIED 0xFF
+#ifndef TZ_NAME_MAX
+#define TZ_NAME_MAX 65     /* readdir の名前の受け取り場所(x86 の FAT は 8.3 で 13 バイトあれば足りるが共有ソースに合わせる) */
+#endif
 
 typedef unsigned int size_t;
 
@@ -62,6 +68,7 @@ static unsigned long _sc_ext(unsigned r) { return r == 0xFFFF ? 0xFFFFFFFFUL : (
 
 
 
+#ifndef TZ_DRV   /* puts / prs / prnum: in the DRIVER (tz/drv16.c) when TZ_DRV */
 /* ---- puts/prs/prnum/prnuml(tzcc 互換。puts は改行を付ける) ---- */
 static int puts(const char *s)
 {
@@ -84,6 +91,8 @@ static void prnum(unsigned v)
         do { b[i++] = (char)('0' + v % 10); v /= 10; } while (v);
         while (i) putchar(b[--i]);
 }
+#endif
+
 
 /* 32bit 表示。libgcc の除算を使わず(ユーザ側に無い)、10 のべきの引き算で桁を出す。 */
 static void __attribute__((unused)) prnuml(unsigned long v)
@@ -99,6 +108,7 @@ static void __attribute__((unused)) prnuml(unsigned long v)
         putchar((char)('0' + (unsigned)v));
 }
 
+#ifndef TZ_DRV   /* printf: in the DRIVER (tz/drv16.c) when TZ_DRV */
 /* printf: %s %d %u %c %x %% だけの簡易版(ulibc.c の実装と同等)。
  * hello.c 以外の canonical コマンドはほぼ prs/puts/prnum を使うので、
  * printf を実際に踏むのは a.c/b.c(printf("A")等)くらいの想定。 */
@@ -137,6 +147,8 @@ static int printf(const char *fmt, ...)
         __builtin_va_end(ap);
         return 0;
 }
+#endif
+
 
 /* ---- FILE(open/read/write/close の上に被せる薄いラッパ) ---- */
 /* ★2026-09-12: FILE スロットの空き判定に fd<0 を使っていたが、tz_files[] は
@@ -148,12 +160,51 @@ static int printf(const char *fmt, ...)
 
 /* klog(msg): /var/log/message へ 1 行追記(syscall 18)。番号は
  * m68k-mega と揃えてある。user/rsyslog.c が使う。 */
+#ifndef TZ_DRV   /* klog: in the DRIVER (tz/drv16.c) when TZ_DRV */
 static void klog(const char *msg)
 {
         syscall5(18, 0, 0, 0, (unsigned)msg, 0);
 }
+#endif
+
 #define TZ_NFILE 4
 typedef struct { int fd; int eof; int err; int used; long pos; } FILE;
+#ifdef TZ_DRV
+/* TZ_DRV (Makefile.tz): these live once, in /bin/driver.bin (tz/drv16.c, numbered by user/drvtab.h as the z80
+ * drv_tbl); user/drvc.S gives each a 5-byte stub. The FILE objects are in the process's own area (user/drvpsp.h),
+ * so a command only ever holds FILE pointers. */
+int puts(const char *s);
+void prs(const char *s);
+void prnum(unsigned v);
+int printf(const char *fmt, ...);
+void klog(const char *msg);
+FILE *fopen(const char *path, const char *mode);
+int fclose(FILE *f);
+int fgetc(FILE *f);
+int fputc(int c, FILE *f);
+size_t fread(void *ptr, size_t size, size_t nmemb, FILE *f);
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *f);
+char *fgets(char *buf, int n, FILE *f);
+int fputs(const char *s, FILE *f);
+int feof(FILE *f);
+int ferror(FILE *f);
+int fflush(FILE *f);
+long ftell(FILE *f);
+int fseek(FILE *f, long off, int whence);
+int opendir(const char *path);
+int readdir(char *name13);
+void closedir(void);
+unsigned long readdir_size(void);
+int unlink(const char *path);
+int mkdir(const char *path);
+int rename(const char *a, const char *b);
+void proc_block(void);
+void proc_wake(unsigned char b);
+int kbhit(void);
+void con_raw(int on);
+int getc_timeout(unsigned wait_ticks);
+#endif
+#ifndef TZ_DRV   /* FILE functions: in the DRIVER (tz/drv16.c) when TZ_DRV */
 static FILE tz_files[TZ_NFILE];
 
 static FILE *fopen(const char *path, const char *mode)
@@ -298,7 +349,10 @@ static int fseek(FILE *f, long off, int whence)
         f->eof = 0;
         return 0;
 }
+#endif
 
+
+#ifndef TZ_DRV   /* directory / unlink / mkdir / rename: in the DRIVER (tz/drv16.c) when TZ_DRV */
 /* ---- ディレクトリ(tzcc 規約: 現在1個だけ開ける前提) ---- */
 static int tz_cur_dh = -1;
 
@@ -349,12 +403,17 @@ static int rename(const char *a, const char *b)
 {
         return (int)syscall5(15, 0, 0, 0, (unsigned)a, (unsigned)b);
 }
+#endif
+
 
 /* ---- プロセス wait/wake・共有メモリ・オーバーレイ・追加ブロック ----
  * tizix 固有の高度機能。x86 側にまだ土台が無いので no-op/失敗スタブのみ。
  * これらを実際に使うコマンド(sh 等)は移植対象外。 */
+#ifndef TZ_DRV   /* proc_block / proc_wake: in the DRIVER (tz/drv16.c) when TZ_DRV */
 static void proc_block(void) {}
 static void proc_wake(unsigned char b) { (void)b; }
+#endif
+
 static unsigned char krun_wait(const char *f, const char *pack, unsigned char argc)
 { (void)f; (void)pack; (void)argc; return 0; }
 static unsigned getbase(void) { return 0; }
@@ -371,7 +430,20 @@ static unsigned getticks(void)
 
 static unsigned long time_get(void)
 {
-        return (unsigned long)syscall5(16, 0, 0, 0, 0, 0);
+        /* syscall の戻りは 16 ビットなので、下位(16)と上位(55)の 2 回で 32 ビットにする(その間に繰り上がる
+         * 1 / 65536 の確率を避けるため、上位を前後で読んで食い違えば読み直す) */
+        unsigned hi, lo, hi2;
+        do {
+                hi = (unsigned)syscall5(55, 0, 0, 0, 0, 0);
+                lo = (unsigned)syscall5(16, 0, 0, 0, 0, 0);
+                hi2 = (unsigned)syscall5(55, 0, 0, 0, 0, 0);
+        } while (hi != hi2);
+        return ((unsigned long)hi << 16) | lo;
+}
+
+static void time_set(unsigned long sec)
+{
+        syscall5(54, 0, (unsigned)sec, (unsigned)(sec >> 16), 0, 0);
 }
 
 static unsigned char pipe_tail(unsigned want)
@@ -412,17 +484,26 @@ static unsigned absrscan(unsigned p, unsigned ch, unsigned n)
         return p - n;
 }
 
-#ifndef VI_XBUF_SIZE
-#define VI_XBUF_SIZE 8192
-#endif
-static char vi_xbuf[VI_XBUF_SIZE];
-static unsigned getxbase(void) { return (unsigned)vi_xbuf; }
-static unsigned getxsize(void) { return (unsigned)VI_XBUF_SIZE; }
+/* vi's text: the rest of the process's own blocks, from the end of bss up to the current stack, as the z80's extra
+ * blocks (#38). vi itself keeps VI_STACK_RESERVE + the undo ring off the top. kexec gives vi __xwant bytes more
+ * (Makefile XWANT_vi) when the pool has room, so the text is about 8KB with enough memory and smaller on a small
+ * machine, instead of a fixed 8KB static that made vi 5 blocks. Called once, early in main (shallow stack).
+ * 0 (vi prints "no xblk") when less than 2KB is left, which vi would not survive. */
+extern char __bss_end[];
+static unsigned getxbase(void) { return (unsigned)__bss_end; }
+static unsigned getxsize(void)
+{
+        char here;
+        unsigned top = (unsigned)&here;
+        if (top < (unsigned)__bss_end + 0x800) return 0;
+        return top - (unsigned)__bss_end;
+}
 
 static unsigned input_ready(void)
 {
         return (unsigned)syscall5(17, 0, 0, 0, 0, 0);
 }
+#ifndef TZ_DRV   /* kbhit / con_raw / getc_timeout: in the DRIVER (tz/drv16.c) when TZ_DRV */
 static int kbhit(void)
 {
         return (int)input_ready();
@@ -439,6 +520,8 @@ static int getc_timeout(unsigned wait_ticks)
                 if ((unsigned)(getticks() - t0) >= wait_ticks) return -1;
         }
 }
+#endif
+
 
 #ifndef PROC_SLOT_KB
 #define PROC_SLOT_KB 64

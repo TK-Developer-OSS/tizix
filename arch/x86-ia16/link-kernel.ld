@@ -36,6 +36,10 @@ SECTIONS
   }
   . = ALIGN(2);
   __bss_end = .;
+  /* Top of the kernel stack. KSTK_TOP given (ld --defsym, Makefile.tz): the stack is in segment 0, below the kernel
+   * (physical 0x600..KSTK_TOP, between the BIOS data and the kernel at the 4KB boundary). Not given (the gcc kernel):
+   * the top of the 64KB window as before. */
+  __kstack_top = DEFINED(KSTK_TOP) ? KSTK_TOP : 0xFFFE;
 
   /DISCARD/ : { *(.comment) *(.note.*) *(.eh_frame) }
 }

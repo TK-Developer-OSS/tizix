@@ -24,6 +24,7 @@ SECTIONS
   .bss (NOLOAD) : { *(.bss) *(.bss.*) *(COMMON) }
   . = ALIGN(2);
   __bss_end = .;
+  PROVIDE(__xwant = 0);   /* header word: bytes wanted above the minimum (the Makefile gives vi its text size) */
 
   /DISCARD/ : { *(.comment) *(.note.*) *(.eh_frame) }
 }
