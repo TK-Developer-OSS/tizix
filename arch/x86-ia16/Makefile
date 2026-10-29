@@ -266,6 +266,7 @@ $(OBJ)/ucmd_wifi.o: user/wifi.c user/tzstdio.h $(UHDRS) | $(OBJ)
 $(OBJ)/ucmd_%.o: user/%.c user/tzstdio.h $(UHDRS) | $(OBJ)
 	$(CC) $(UCFLAGS) -I$(TZSRC) -c -o $@ $<
 
+TZPORT_CMDS += $(if $(filter 1,$(GCC)),,ttyecho)
 TZPORT_BINS = $(addprefix $(OBJ)/,$(addsuffix .bin,$(TZPORT_CMDS)))
 
 USERBINS = $(TZPORT_BINS)

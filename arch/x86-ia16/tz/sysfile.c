@@ -239,6 +239,7 @@ void proc_release(unsigned n)
     }
 }
 
+unsigned tz_seg_get(unsigned k);
 unsigned sys_call(unsigned ax, unsigned bx, unsigned cx, unsigned si, unsigned di, unsigned cseg)
 {
     unsigned fn;
@@ -268,6 +269,12 @@ unsigned sys_call(unsigned ax, unsigned bx, unsigned cx, unsigned si, unsigned d
         return tz_time_lo();
     if (fn == 55)
         return tz_time_hi();
+    if (fn == 56) {                     /* seg_live(si): 1 if a running slot has this segment (the DRIVER's serial port owner) */
+        for (u = 1; u < x86_nslots(); u++)
+            if (kw[u] != 0 && tz_seg_get(u) == si)
+                return 1;
+        return 0;
+    }
     if (fn == 54) {
         time_set(bx, cx);
         return 0;

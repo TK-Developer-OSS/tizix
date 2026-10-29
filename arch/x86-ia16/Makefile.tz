@@ -96,8 +96,10 @@ $(OBJ)/drv16e.o: tz/drv16e.S user/drvtab.h user/drvpsp.h | $(OBJ)
 	$(CC) -x assembler-with-cpp -Iuser -c -o $@ $<
 $(OBJ)/drv16.o: $(OBJ)/drv16.tz.s
 	$(CC) -c -o $@ $<
-$(OBJ)/driver.bin: $(OBJ)/drv16e.o $(OBJ)/drv16.o tz/drv16.ld
-	$(LD) -T tz/drv16.ld -o $@ $(OBJ)/drv16e.o $(OBJ)/drv16.o
+$(OBJ)/drvtty.o: tz/drvtty.S | $(OBJ)
+	$(CC) -x assembler-with-cpp -Iuser -c -o $@ $<
+$(OBJ)/driver.bin: $(OBJ)/drv16e.o $(OBJ)/drv16.o $(OBJ)/drvtty.o tz/drv16.ld
+	$(LD) -T tz/drv16.ld -o $@ $(OBJ)/drv16e.o $(OBJ)/drv16.o $(OBJ)/drvtty.o
 	@echo "driver.bin = $$(stat -c%s $@) bytes"
 USERBINS += $(OBJ)/driver.bin
 $(IMG): $(OBJ)/driver.bin
