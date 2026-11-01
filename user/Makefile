@@ -52,7 +52,7 @@ OBJ := ../build/arch/$(ARCH)/user
 #   0x1000 以下かで判る(超えると **ビルドは通り、実行時に飛ぶ**ので要注意)。
 OPTOFF     := --nogcse --noinvariant --nolabelopt --noloopreverse --nooverlay
 CFLAGS_CMD := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
-              $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=14 -DNO_HISTORY)
+              $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=19 -DNO_HISTORY)
 CFLAGS_DRV := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
               $(if $(filter z80board,$(ARCH)),-DARCH_Z80BOARD) \
               $(if $(filter z80-pc8801,$(ARCH)),-DARCH_PC8801)
@@ -170,6 +170,8 @@ $(OBJ)/drvvec.rel: drvvec.s | $(OBJ)
 #    誰も参照していない名前を渡すと `No definition of symbol ...` でリンクが落ちる。
 #    (#32 で driver.c が vfs_resolve を呼ばなくなった際にこれを踏んだ)
 FS_SYMS = $(shell awk '$$2=="__f_open"||$$2=="_f_open"{print "-g _f_open=0x"$$1} $$2=="__f_close"||$$2=="_f_close"{print "-g _f_close=0x"$$1} $$2=="__f_read"||$$2=="_f_read"{print "-g _f_read=0x"$$1} $$2=="__f_write"||$$2=="_f_write"{print "-g _f_write=0x"$$1} $$2=="__f_lseek"||$$2=="_f_lseek"{print "-g _f_lseek=0x"$$1} $$2=="__f_sync"||$$2=="_f_sync"{print "-g _f_sync=0x"$$1} $$2=="__proc_block"||$$2=="_proc_block"{print "-g _proc_block=0x"$$1} $$2=="__proc_wake"||$$2=="_proc_wake"{print "-g _proc_wake=0x"$$1} $$2=="__kdir_open"||$$2=="_kdir_open"{print "-g _kdir_open=0x"$$1} $$2=="__kdir_read"||$$2=="_kdir_read"{print "-g _kdir_read=0x"$$1} $$2=="__kdir_close"||$$2=="_kdir_close"{print "-g _kdir_close=0x"$$1} $$2=="__kfs_mkdir"||$$2=="_kfs_mkdir"{print "-g _kfs_mkdir=0x"$$1} $$2=="__kfs_unlink"||$$2=="_kfs_unlink"{print "-g _kfs_unlink=0x"$$1} $$2=="__kfs_rename"||$$2=="_kfs_rename"{print "-g _kfs_rename=0x"$$1} $$2=="_kexec_argv"{print "-g _kexec_argv=0x"$$1} $$2=="_builtin_try"{print "-g _builtin_try=0x"$$1} $$2=="_builtin_is"{print "-g _builtin_is=0x"$$1} $$2=="_redir_begin"{print "-g _redir_begin=0x"$$1} $$2=="_redir_end"{print "-g _redir_end=0x"$$1} $$2=="_in_begin"{print "-g _in_begin=0x"$$1} $$2=="_in_end"{print "-g _in_end=0x"$$1} $$2=="_pipe_setup"{print "-g _pipe_setup=0x"$$1} $$2=="_pipe_attach_writer"{print "-g _pipe_attach_writer=0x"$$1} $$2=="_pipe_teardown"{print "-g _pipe_teardown=0x"$$1} $$2=="_pipe_note_exit"{print "-g _pipe_note_exit=0x"$$1} $$2=="_pipe_ovf"{print "-g _pipe_ovf=0x"$$1} $$2=="_pipe_tail"{print "-g _pipe_tail=0x"$$1} $$2=="_krun_pipe"{print "-g _krun_pipe=0x"$$1} $$2=="_kdir_size"{print "-g _kdir_size=0x"$$1} $$2=="_kpath"{print "-g _kpath=0x"$$1} $$2=="_kchdir"{print "-g _kchdir=0x"$$1} $$2=="_kgetcwd"{print "-g _kgetcwd=0x"$$1} $$2=="_con_break"{print "-g _con_break=0x"$$1} $$2=="_con_pending"{print "-g _con_pending=0x"$$1} $$2=="_krun_wait"{print "-g _krun_wait=0x"$$1} $$2=="_klog_write"{print "-g _klog_write=0x"$$1} $$2=="_kfs_df"{print "-g _kfs_df=0x"$$1} $$2=="__kdev_open"||$$2=="_kdev_open"{print "-g _kdev_open=0x"$$1} $$2=="__kdev_stream"||$$2=="_kdev_stream"{print "-g _kdev_stream=0x"$$1} $$2=="__kdev_seek"||$$2=="_kdev_seek"{print "-g _kdev_seek=0x"$$1} $$2=="__kdev_tell"||$$2=="_kdev_tell"{print "-g _kdev_tell=0x"$$1}' ../build/arch/$(ARCH)/obj/kernel.map 2>/dev/null)
+# PC-8801 の driver だけが、キー入力待ちの判定に con_rx_ready を使う(他アーキは参照しないので -g を出すとリンクが失敗する)
+FS_SYMS += $(if $(filter z80-pc8801,$(ARCH)),$(shell awk '$$2=="_con_rx_ready"{print "-g _con_rx_ready=0x"$$1}' ../build/arch/$(ARCH)/obj/kernel.map))
 
 $(OBJ)/driver.ihx: $(OBJ)/drvvec.rel $(OBJ)/driver.rel Makefile ../build/arch/$(ARCH)/obj/kernel.map
 	$(SDLD) -n -i $@ -b _CODE=0x9000 \

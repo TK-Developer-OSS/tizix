@@ -218,7 +218,7 @@ tizixcmd: $(TARGET) $(BUILD)/crt0_tizix.rel $(BUILD)/libtzc.lib $(if $(OVLVEC),$
 	cp include/string.h       $(TZCMD_DIR)/string.h
 	cp include/stdlib.h       $(TZCMD_DIR)/stdlib.h
 	cp include/ctype.h        $(TZCMD_DIR)/ctype.h
-	./$(TARGET) --tizix-user -o $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).c
+	./$(TARGET) --tizix-user $(TZDEFS) -o $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).c
 	$(ASTZ) $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).rel --as $(AS)
 	@rm -f $(TZCMD_DIR)/$(CMD).extra.rels
 	@for e in $(EXTRA); do \
@@ -287,7 +287,7 @@ tizixovl: $(TARGET) $(BUILD)/crt0_ovl.rel $(BUILD)/libtzc.lib
 	cp include/string.h       $(TZCMD_DIR)/string.h
 	cp include/stdlib.h       $(TZCMD_DIR)/stdlib.h
 	cp include/ctype.h        $(TZCMD_DIR)/ctype.h
-	./$(TARGET) --tizix-user -o $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).c
+	./$(TARGET) --tizix-user $(TZDEFS) -o $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).c
 	$(ASTZ) $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).rel --as $(AS)
 	@# TZVEC は渡さない。低位ベクタは crt0_ovl.s が実体として定義している
 	@# (sdld の -g は「参照されている未定義シンボル」にしか値を与えられず、
@@ -318,7 +318,7 @@ tizixovlcmd: $(TARGET) $(BUILD)/crt0_tizix.rel $(BUILD)/libtzc.lib
 	cp include/string.h       $(TZCMD_DIR)/string.h
 	cp include/stdlib.h       $(TZCMD_DIR)/stdlib.h
 	cp include/ctype.h        $(TZCMD_DIR)/ctype.h
-	./$(TARGET) --tizix-user -o $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).c
+	./$(TARGET) --tizix-user $(TZDEFS) -o $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).c
 	$(PYTHON) ovlsplit.py $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).split.s --cmd $(CMD) --conf ovl/$(CMD).ovl > $(TZCMD_DIR)/$(CMD).novl
 	mv $(TZCMD_DIR)/$(CMD).split.s $(TZCMD_DIR)/$(CMD).s
 	$(ASTZ) $(TZCMD_DIR)/$(CMD).s $(TZCMD_DIR)/$(CMD).rel --as $(AS)

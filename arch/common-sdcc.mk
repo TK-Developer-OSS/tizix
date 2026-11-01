@@ -129,7 +129,7 @@ TZCC_DIR ?= $(ROOTDIR)/tzcc
 tzcc-cmds:
 	@test -d $(TZCC_DIR) || { echo "TZCC_DIR=$(TZCC_DIR) が無い。git clone 先を TZCC_DIR= で指定"; exit 1; }
 	$(MAKE) -C $(TZCC_DIR) tizixcmds TIZIX_ROOT=$(ROOTDIR) \
-		TIZIX_USERBIN=$(ROOTDIR)/build/arch/$(ARCH)/user TIZIX_DRIVEB=$(CURDIR)/$(FATDSK)
+		TIZIX_USERBIN=$(ROOTDIR)/build/arch/$(ARCH)/user TIZIX_DRIVEB=$(CURDIR)/$(FATDSK) TZDEFS="$(TZDEFS)"
 
 # user/ の sh・スクラッチ・DRIVER.BIN を先に、その後 coreutils を tzcc で
 # 上書き生成(user clean が build/arch/$(ARCH)/user を消すため順序が重要)。

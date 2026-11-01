@@ -489,7 +489,13 @@ unsigned char kexec_argv(const char *fname, const char *argpack, unsigned char a
     span = 0;
     n = PROC_BLK_HI;
     for (k = PROC_BLK_LO; k < PROC_BLK_HI; k++) {
-        if (PIDTBL[k] == 0) {
+        /* 空きの直後の PID_CONT は持ち主のいない続き(Ctrl+C / kill は先頭だけ 0 にするので、
+         * vi など複数ブロックのプロセスの続きが残る)。空き扱いにして、"no free block" を防ぐ。 */
+#ifdef ARCH_Z80BOARD
+        if (PIDTBL[k] == 0) {            /* ROM の空きが無いので、この回収は載せない */
+#else
+        if (PIDTBL[k] == 0 || (span && PIDTBL[k] == PID_CONT)) {
+#endif
             span++;
             if (span == nblk) { n = k + 1 - nblk; break; }
         } else {

@@ -19,6 +19,9 @@ DATA_LOC = 0x8000
 # boot.s ÇÃ NSEC Ç∆àÍívïKê{(è„å¿ÇÕ DATA_LOC=0x8000)
 NSEC     = 254
 
+# tzcc build of vi: show 14 body rows (screen is 80x20, top 5 rows reserved for IPL, 1 status row)
+TZDEFS = -DTROWS=19 -DVI_NAME_RIGHT
+
 # Output files
 DISK   = disks/drivea.d88
 FATDSK = disks/driveb.d88

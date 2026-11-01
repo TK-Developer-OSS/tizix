@@ -6,7 +6,7 @@
  *   テキスト VRAM は 0xF3C8 起点で 1 行 120B(文字 80 + 属性 40)、
  *   ファーム(擬似 BIOS / N88)が CRTC と DMA を設定済みなので、ここは
  *   文字コードを書くだけ。0xF000 以降(block7)は crt0.s がカーネルから
- *   取り上げてある。上 5 行は IPL と将来のメッセージ用に空けてある。
+ *   取り上げてある。
  *
  *   入力(キーボード)は未実装: con_getc は戻らない。
  *   2026-10-04: 骨組み。cpmsim 流用(z80pack)はこのファイルを使わない。
@@ -14,7 +14,7 @@
 #define TVRAM  0xF3C8u
 #define PITCH  120u
 #define COLS   80
-#define ROW0   5            /* 先頭行(0 起点) */
+#define ROW0   0            /* 先頭行(0 起点) */
 #define ROWS   20            /* 擬似 BIOS は 80x20 表示。最下行(19)はファンクションキーの帯だった */
 
 __sfr __at (0x50) CRTC_PRM;
@@ -24,16 +24,16 @@ static unsigned char *crow;     /* 現在行の先頭 */
 static unsigned char ccol;
 static unsigned char crn;       /* 現在行番号 */
 
-/* 1 行スクロール: 6 行目以降を 1 行上へ(文字も属性も 120B ずつまとめて LDIR)、最下行の文字を消す。
- *   定数は TVRAM=0xF3C8 PITCH=120 ROW0=5 ROWS=20 から:
- *     移動元 0xF3C8+6*120=0xF698 / 移動先 0xF3C8+5*120=0xF620 / 長さ 14*120=0x0690 /
+/* 1 行スクロール: 2 行目以降を 1 行上へ(文字も属性も 120B ずつまとめて LDIR)、最下行の文字を消す。
+ *   定数は TVRAM=0xF3C8 PITCH=120 ROW0=0 ROWS=20 から:
+ *     移動元 0xF3C8+1*120=0xF440 / 移動先 0xF3C8 / 長さ 19*120=0x08E8 /
  *     最下行(19)= 0xF3C8+19*120=0xFCB0(LDIR 後の DE がちょうどここ) */
 static void kscroll(void) __naked
 {
     __asm
-        ld      hl, #0xF698
-        ld      de, #0xF620
-        ld      bc, #0x0690
+        ld      hl, #0xF440
+        ld      de, #0xF3C8
+        ld      bc, #0x08E8
         ldir
         ld      h, d
         ld      l, e
@@ -66,6 +66,12 @@ void con_putc(char c)
     if (crow == 0) {
         crow = (unsigned char *)TVRAM + (unsigned)ROW0 * PITCH;
         crn = ROW0;
+        /* IPL の "TIZIX IPL" などの表示を消す */
+        for (i = 0; i < ROWS; i++) {
+            unsigned char j;
+            for (j = 0; j < COLS; j++)
+                ((unsigned char *)TVRAM)[(unsigned)i * PITCH + j] = ' ';
+        }
         for (i = 0; i < 120; i++)
             crow[(unsigned)(ROWS - 1 - ROW0) * PITCH + i] = i < 80 ? ' ' : (i & 1) ? 0 : 0x80;
     }
@@ -84,7 +90,7 @@ void con_putc(char c)
             if (c >= 0x40 && c <= 0x7E) {
                 in_esc = 0;
                 if (esc_len < 7) esc_buf[esc_len] = 0;
-                if (esc_len == 2 && esc_buf[0] == '2' && c == 'J') {
+                if (esc_len == 1 && esc_buf[0] == '2' && c == 'J') {
                     unsigned char *p = (unsigned char *)TVRAM + (unsigned)ROW0 * PITCH;
                     for (i = ROW0; i < ROWS; i++) {
                         unsigned char j;
@@ -114,6 +120,10 @@ void con_putc(char c)
                     crow = (unsigned char *)TVRAM + (unsigned)crn * PITCH;
                     ccol = col;
                 }
+                /* ESC[H などで動いたカーソルを、点滅カーソルにも反映する */
+                CRTC_CMD = 0x81;
+                CRTC_PRM = ccol;
+                CRTC_PRM = crn;
             } else {
                 if (esc_len < 7) esc_buf[esc_len++] = c;
             }

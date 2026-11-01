@@ -1594,6 +1594,14 @@ int main(int argc, char *argv[]) {
             opt_x86 = 1;
         } else if (strcmp(a, "--march=ia16") == 0) {
             opt_ia16 = 1;
+        } else if (a[0] == '-' && a[1] == 'D' && a[2]) {      // -DNAME または -DNAME=VAL
+            char dn[64];
+            const char *eq = strchr(a + 2, '=');
+            size_t nl = eq ? (size_t)(eq - (a + 2)) : strlen(a + 2);
+            if (nl >= sizeof dn) nl = sizeof dn - 1;
+            memcpy(dn, a + 2, nl);
+            dn[nl] = 0;
+            lexer_cli_define(dn, eq ? eq + 1 : "1");
         } else if (a[0] == '-' && a[1]) {
             fprintf(stderr, "warning: ignoring unknown option '%s'\n", a);
         } else {

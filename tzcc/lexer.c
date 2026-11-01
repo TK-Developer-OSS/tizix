@@ -263,6 +263,19 @@ void lexer_set_source_dir(const char *dir) {
 
 int lexer_error(void) { return lexer_had_error; }
 
+/* コマンドラインの -DNAME[=VAL]。lexer_init が macro 表を作り直すので、ここへ貯めて
+ *   lexer_init の最後に定義し直す(アーキ別の定数を Makefile から渡すため)。 */
+static char cli_name[16][64];
+static char cli_val[16][64];
+static int  cli_n;
+
+void lexer_cli_define(const char *name, const char *val) {
+    if (cli_n >= 16) return;
+    snprintf(cli_name[cli_n], sizeof cli_name[0], "%s", name);
+    snprintf(cli_val[cli_n], sizeof cli_val[0], "%s", val);
+    cli_n++;
+}
+
 void lexer_init(const char *source) {
     src = source;
     line = 1;
@@ -280,6 +293,7 @@ void lexer_init(const char *source) {
     macro_weak_n = macro_n;             /* ここまでは #ifdef から見えない(上の注記) */
     // コンパイラの識別。共有ソースが `#ifdef __TZCC__` で枝を選べるように。
     lexer_define_macro("__TZCC__", "1");
+    for (int ci = 0; ci < cli_n; ci++) lexer_define_macro(cli_name[ci], cli_val[ci]);
     cond_depth = 0;
 }
 

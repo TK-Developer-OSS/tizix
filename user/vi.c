@@ -298,18 +298,35 @@ static void status(void)
     scr_col = 1;
     mvcur();
     esc("[K");
+#ifdef VI_NAME_RIGHT
+    /* 左下にモードとメッセージ、ファイル名は右下へ(最終桁は書かない: 書くと改行して画面が 1 行上がる) */
+    if (mode) prs("[INSERT]");
+#else
     prs(fname);
     if (dirty) prs(" [+]");
 
     if (mode) prs("  -- INSERT --");
+#endif
     /* メッセージは 3 種に絞ってある。「保存できなかった」系は理由を分けずに
      * 1 本にまとめた。
      * ★switch ではなく if の連鎖(do_cmd と同じ理由。tzcc の switch は
      *   case 本体への PIC 間接ジャンプと break のジャンプを払う)。#69 で
      *   core を詰めるときに書き換えた。 */
+#ifdef VI_NAME_RIGHT
+    if (msgid == 1) prs(" saved");
+    else if (msgid == 2) prs(" modified");
+    else if (msgid == 3) prs(" cannot write");
+#else
     if (msgid == 1) prs("  written");
     else if (msgid == 2) prs("  modified (:q!)");
     else if (msgid == 3) prs("  cannot write");
+#endif
+#ifdef VI_NAME_RIGHT
+    scr_col = 52;
+    mvcur();
+    prs(fname);
+    if (dirty) prs(" [+]");
+#endif
     /* 6(buffer full)は 0 に寄せた。ins_at が黙って拒否する = 打っても
      * 文字が増えないので、それ自体が合図になる。
      * 4(大きすぎて保存不可)と 5(新規ファイル)は 3 と 0 に寄せた */

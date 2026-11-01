@@ -85,6 +85,7 @@ Token *lexer_next_token();
 
 /* パーサから定数（enum 値など）をマクロ表へ登録する */
 void lexer_define_macro(const char *name, const char *body);
+void lexer_cli_define(const char *name, const char *val);
 
 /* #include 用: メインソースが置かれているディレクトリを "..." 検索の基点にする */
 void lexer_set_source_dir(const char *dir);

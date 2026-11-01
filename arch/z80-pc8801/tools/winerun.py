@@ -60,7 +60,7 @@ def boot(wait=240):
     pe("pkill -f M88.exe; wineserver -k; true")
     time.sleep(4)
     _screen.clear()
-    for n in ("tizix_a.d88", "tizix_b.d88"):
+    for n in ("tizixa.d88", "tizixb.d88"):
         src = os.path.join(ARCH, "drive%s.d88" % ("a" if n.endswith("a.d88") else "b"))
         subprocess.run(["cp", "-f", src, os.path.join(WORK, n)], check=True)
     if D == ":99" and pe("pgrep Xvfb").returncode != 0:
@@ -77,7 +77,7 @@ def boot(wait=240):
         time.sleep(1)
     time.sleep(8)
     shot(os.path.join(SHOTS, "boot0.png"))
-    if not set_drive(1, "tizix_a.d88") or not set_drive(2, "tizix_b.d88"):
+    if not set_drive(1, "tizixa.d88") or not set_drive(2, "tizixb.d88"):
         return False
     shot(os.path.join(SHOTS, "boot1.png"))
     focus()
@@ -167,6 +167,28 @@ for _c in "abcdefghijklmnopqrstuvwxyz":
     CHARKEY[_c.upper()] = "S-" + _c
 
 
+# 記号キーはキー名(keysym)でなく物理キーコード(evdev)で押す。実画面は日本語配列で、keysym 指定だと別の物理キーに当たる。
+_PHYS = {"minus": 20, "equal": 21, "bracketleft": 34, "bracketright": 35, "backslash": 51, "semicolon": 47,
+         "apostrophe": 48, "grave": 49, "comma": 59, "period": 60, "slash": 61}
+
+
+# 実画面(日本語配列 jp)は物理キーの並びが違うので、文字 → (物理キーコード, Shift) の表で打つ(2026-11-01 実測)。
+#   キーコード 49(半角/全角)は IME を切り替えてしまうので、決して押さない。
+_JIS = {"-": (20, 0), "=": (20, 1), "^": (21, 0), "~": (21, 1), "@": (34, 0), "`": (34, 1), "[": (35, 0), "{": (35, 1),
+        "]": (51, 0), "}": (51, 1), ";": (47, 0), "+": (47, 1), ":": (48, 0), "*": (48, 1), ",": (59, 0), "<": (59, 1),
+        ".": (60, 0), ">": (60, 1), "/": (61, 0), "?": (61, 1), "\\": (132, 0), "|": (132, 1), "_": (97, 1)}
+
+
+def _is_jp():
+    r = subprocess.run(["setxkbmap", "-display", D, "-query"], capture_output=True, text=True)
+    return any(l.startswith("layout:") and l.split()[1].startswith("jp") for l in r.stdout.splitlines())
+
+
+if _is_jp():
+    for _ch, (_kc, _sh) in _JIS.items():
+        CHARKEY[_ch] = ("S-" if _sh else "") + str(_kc)
+
+
 def type_line(s, hold=float(os.environ.get("WINERUN_HOLD", "0.12")), ret=True):
     seq = []
     for ch in s:
@@ -176,8 +198,10 @@ def type_line(s, hold=float(os.environ.get("WINERUN_HOLD", "0.12")), ret=True):
             continue
         if k.startswith("S-"):
             k = k[2:]
+            k = str(_PHYS.get(k, k))
             seq.append("xdotool keydown Shift_L; sleep 0.05; xdotool keydown %s; sleep %s; xdotool keyup %s; xdotool keyup Shift_L; sleep 0.05" % (k, hold, k))
         else:
+            k = str(_PHYS.get(k, k))
             seq.append("xdotool keydown %s; sleep %s; xdotool keyup %s; sleep 0.05" % (k, hold, k))
     if ret:
         seq.append("xdotool keydown Return; sleep %s; xdotool keyup Return" % hold)
@@ -219,11 +243,36 @@ class _Mem:
         return r.stdout
 
 
+ADDR_FILE = os.path.join(SHOTS, "screen.addr")
+
+
+def _save_addr():
+    """カーネルが起動後に上 5 行の "TIZIX IPL" を消すので、起動中に見つけた位置を(M88 の pid 付きで)残す。"""
+    try:
+        os.makedirs(SHOTS, exist_ok=True)
+        open(ADDR_FILE, "w").write("%d %d\n" % (_screen["pid"], _screen["addr"]))
+    except OSError:
+        pass
+
+
+def _load_addr():
+    try:
+        pid, addr = map(int, open(ADDR_FILE).read().split())
+    except (OSError, ValueError):
+        return None
+    if pid != m88_pid():
+        return None
+    _screen["pid"], _screen["addr"] = pid, addr
+    return addr
+
+
 def find_screen():
     """TVRAM 行 3 の先頭アドレス(TIZIX IPL の下 2 行目に FAT Drive があるもの)を探す。"""
     pid = m88_pid()
     if pid is None:
         return None
+    if _load_addr():
+        return _screen["addr"]
     pat = b"TIZIX IPL"
     fallback = None
     try:
@@ -247,6 +296,7 @@ def find_screen():
                     break
                 if buf[i + 240:i + 249] == b"FAT Drive":
                     _screen["pid"], _screen["addr"] = pid, a + i
+                    _save_addr()
                     return a + i
                 # 起動後は FAT Drive の行が消えるので、TVRAM のレイアウト(80 文字 + 属性 40 バイト)で代用する
                 if buf[i + 80:i + 84] == b"\x80\x00\x80\x00" and fallback is None:
@@ -256,6 +306,7 @@ def find_screen():
         return None
     if fallback is not None:
         _screen["pid"], _screen["addr"] = pid, fallback
+        _save_addr()
     return fallback
 
 
@@ -323,7 +374,7 @@ def vitest():
     # boot 直後は起動処理で打鍵を取りこぼす(先頭の 10 文字ほどが落ちる)。echo が返るまでウォームアップする。
     warmup()
     type_line("vi " + path)
-    if not waitfor("^" + re.escape(path), 90):
+    if not waitfor(r"^ {10,}" + re.escape(path), 90):
         print("FAIL vi: vi が起動しない(最下行にファイル名が出ない)")
         return False
     time.sleep(1.5)
@@ -335,16 +386,34 @@ def vitest():
     for c in "hello":
         type_line(c, ret=False)
         time.sleep(3)
+    # 2 行目も打ち、1 行目(hello)が画面に残っているか確認(TROWS が画面行数より大きいとスクロールで消える #262)
+    key("Return")
+    time.sleep(3)
+    type_line("x", ret=False)
+    time.sleep(3)
+    scr = screen() or []
+    if not any(l.strip() == "hello" for l in scr):
+        print("FAIL vi: 2 行目を打つと 1 行目(hello)が画面から消える")
+        return False
     key("Escape")
     time.sleep(3)
+    # ESC 単体は getc_timeout の時間切れで確定する。CON_RXRDY が常に真だと次のキーまで確定せず INSERT が残る。
+    if any("INSERT" in l for l in (screen() or [])):
+        print("FAIL vi: Escape の後も -- INSERT -- が残る(ESC が次のキーまで確定しない)")
+        return False
     for c in ":wq":
         type_line(c, ret=False)
         time.sleep(1)
     key("Return")
-    if not waitfor("written", 30):
-        print("FAIL vi: :wq の後に written が出ない")
+    # vi は終了時に ESC[2J で画面を消すので "written" は見えない。シェルのプロンプトが戻るのを待つ。
+    if not waitfor(r"^\[.*\]#\s*$", 30):
+        print("FAIL vi: :wq の後にプロンプトが戻らない")
         return False
-    time.sleep(1.5)
+    time.sleep(3)
+    left = [l for l in (screen() or []) if l.startswith("~")]
+    if left:
+        print("FAIL vi: 終了後に画面が消えず ~ が残る(%d 行)" % len(left))
+        return False
     out = run_cmd("cat " + path)
     ok = out is not None and any("hello" in l for l in out)
     print("%s vi hello => %s" % ("PASS" if ok else "FAIL", " / ".join(out) if out else "(timeout)"))
@@ -398,4 +467,5 @@ def main():
         sys.exit(1 if fail else 0)
 
 
-main()
+if __name__ == "__main__":
+    main()

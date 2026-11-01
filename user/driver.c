@@ -63,6 +63,12 @@ extern const char *kpath(const char *in, unsigned char slot) __sdcccall(0);
  * 直接ポートを叩くと ISR の読み出しと競合してバイトを取りこぼす。 */
 #define CON_RXRDY()  (*(volatile unsigned char *)KW_RXHEAD != \
                       *(volatile unsigned char *)KW_RXTAIL)
+#elif defined(ARCH_PC8801)
+/* PC-8801: ポート 0x00 はキーボードマトリクス(離しているとき 0xFF)なので CONSTAT として読めない。
+ * 入力待ちの判定はカーネル(console.c のキー受信リング)に聞く。ここを CONSTAT にすると
+ * 常に「入力あり」になり、getc_timeout が時間切れにならず ESC 単体が次のキーまで確定しない。 */
+extern int con_rx_ready(void);
+#define CON_RXRDY()  con_rx_ready()
 #else
 __sfr __at 0x00 CONSTAT;
 #define CON_RXRDY()  (CONSTAT)
