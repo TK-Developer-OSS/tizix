@@ -34,7 +34,7 @@ unsigned char pipe_ovf(void) __sdcccall(0);
 
 /* パイプ後段 tail 用: writer 完了まで待って 4KB 窓を後方スキャンし、末尾
  *   want 行を kputchar 出力する。戻り 1=処理した / 0=パイプ reader ではない。 */
-unsigned char pipe_tail(unsigned want) __sdcccall(0);
+unsigned int pipe_tail(unsigned want) __sdcccall(0);
 
 /* sh の run_kpipe 待ちループが、パイプ相手の終了(PIDTBL==0)を見て呼ぶ。
  * writer 終了 → weof、reader 終了 → rgone(相手を起こす)。 */

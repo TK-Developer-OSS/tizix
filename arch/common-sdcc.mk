@@ -33,11 +33,7 @@ ASFLAGS = $(PLAT_DEF_AS)
 # ---- リンク対象 ----
 #   sh.rel は z80 では外部コマンド化(user/sh.c → /bin/sh.bin)したのでカーネル
 #   像から外す(~2KB 減。NSEC=254 の天井対策)。
-ifeq ($(ARCH),z80-pc8801)
-KOBJ_BASE = crt0.rel init.rel kernel.rel builtin.rel kexec.rel ff.rel diskio.rel fatcmd.rel vfs.rel pipestub.rel dev.rel
-else
 KOBJ_BASE = crt0.rel init.rel kernel.rel builtin.rel kexec.rel ff.rel diskio.rel fatcmd.rel vfs.rel pipe.rel dev.rel
-endif
 KOBJ = $(KOBJ_BASE) $(KOBJ_ARCH)
 KRELS   = $(addprefix $(OBJDIR)/, $(KOBJ))
 IVT_REL = $(OBJDIR)/ivthelpers.rel
@@ -70,7 +66,7 @@ $(OBJDIR)/%.rel: %.s | $(OBJDIR)
 $(OBJDIR)/crt0.rel: $(wildcard ../common-z80/*.inc)
 
 $(OBJDIR)/ivthelpers.rel: $(SRCDIR)/ivthelpers.c | $(OBJDIR)
-	$(CC) $(MZ80) --reserve-regs-iy -c --sdcccall 0 --opt-code-size -o $@ $<
+	$(CC) $(MZ80) --reserve-regs-iy -c --sdcccall 0 --opt-code-size $(PLAT_DEF) -o $@ $<
 
 # ---- ヘッダ依存は sdcc -MM で自動生成する(#55)----
 #   以前は下のような手書きの依存を並べていたが、漏れがあった

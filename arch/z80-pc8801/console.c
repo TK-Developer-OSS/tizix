@@ -59,6 +59,17 @@ static unsigned char in_esc;
 static char esc_buf[8];
 static unsigned char esc_len;
 
+/* 画面(文字部)を全部消す */
+static void clrscr(void)
+{
+    unsigned char *p = (unsigned char *)TVRAM + (unsigned)ROW0 * PITCH;
+    unsigned char i, j;
+    for (i = ROW0; i < ROWS; i++) {
+        for (j = 0; j < COLS; j++) p[j] = ' ';
+        p += PITCH;
+    }
+}
+
 void con_putc(char c)
 {
     unsigned char i;
@@ -67,11 +78,7 @@ void con_putc(char c)
         crow = (unsigned char *)TVRAM + (unsigned)ROW0 * PITCH;
         crn = ROW0;
         /* IPL の "TIZIX IPL" などの表示を消す */
-        for (i = 0; i < ROWS; i++) {
-            unsigned char j;
-            for (j = 0; j < COLS; j++)
-                ((unsigned char *)TVRAM)[(unsigned)i * PITCH + j] = ' ';
-        }
+        clrscr();
         for (i = 0; i < 120; i++)
             crow[(unsigned)(ROWS - 1 - ROW0) * PITCH + i] = i < 80 ? ' ' : (i & 1) ? 0 : 0x80;
     }
@@ -91,12 +98,7 @@ void con_putc(char c)
                 in_esc = 0;
                 if (esc_len < 7) esc_buf[esc_len] = 0;
                 if (esc_len == 1 && esc_buf[0] == '2' && c == 'J') {
-                    unsigned char *p = (unsigned char *)TVRAM + (unsigned)ROW0 * PITCH;
-                    for (i = ROW0; i < ROWS; i++) {
-                        unsigned char j;
-                        for (j = 0; j < COLS; j++) p[j] = ' ';
-                        p += PITCH;
-                    }
+                    clrscr();
                     crow = (unsigned char *)TVRAM + (unsigned)ROW0 * PITCH;
                     crn = ROW0;
                     ccol = 0;
@@ -120,10 +122,8 @@ void con_putc(char c)
                     crow = (unsigned char *)TVRAM + (unsigned)crn * PITCH;
                     ccol = col;
                 }
-                /* ESC[H などで動いたカーソルを、点滅カーソルにも反映する */
-                CRTC_CMD = 0x81;
-                CRTC_PRM = ccol;
-                CRTC_PRM = crn;
+                /* ESC[H などで動いたカーソルを、点滅カーソルにも反映する(末尾の更新へ) */
+                goto cursor;
             } else {
                 if (esc_len < 7) esc_buf[esc_len++] = c;
             }
@@ -146,6 +146,7 @@ void con_putc(char c)
             newline();
         }
     }
+cursor:
     /* 点滅カーソルを入力位置へ(µPD3301 のカーソル位置設定: 0x81 のあとに X, Y) */
     CRTC_CMD = 0x81;
     CRTC_PRM = ccol;

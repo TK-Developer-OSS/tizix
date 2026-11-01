@@ -5043,6 +5043,7 @@ FRESULT f_getfree (
 /* API: Truncate File                                                    */
 /*-----------------------------------------------------------------------*/
 
+#ifndef ARCH_Z80_PC8801	/* kernel never calls f_truncate; saves ~0.5KB under the 0x8000 limit */
 FRESULT f_truncate (
 	FIL* fp		/* Pointer to the file object */
 )
@@ -5086,8 +5087,7 @@ FRESULT f_truncate (
 
 	LEAVE_FF(fs, res);
 }
-
-
+#endif
 
 
 /*-----------------------------------------------------------------------*/

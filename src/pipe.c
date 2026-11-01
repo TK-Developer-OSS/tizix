@@ -175,7 +175,7 @@ int pipe_getc(void) __sdcccall(0)
  *   その端末へ)。tail.c 側は 1 行 `pipe_tail(want)` で済み、1 ブロックに収まる。
  *   戻り 1=パイプ後段として処理した / 0=パイプの reader ではない(tail が
  *   "needs FILE or pipe" を出す)。総量 4KB 超なら先頭 4KB 分の末尾 want 行。 */
-unsigned char pipe_tail(unsigned want) __sdcccall(0)
+unsigned int pipe_tail(unsigned want) __sdcccall(0)   /* unsigned int: HL fully defined for tzcc callers that read HL */
 {
     volatile unsigned char *b;
     unsigned n, i, start, end, nl;
@@ -249,10 +249,10 @@ void pipe_note_exit(unsigned char blk) __sdcccall(0)
 static void pipe_fname(char *dst, const char *name)
 {
     unsigned char i = 0, j = 0;
+    const char *t;
     char c;
-    if (name[0] != '/') {
-        dst[j++] = '/'; dst[j++] = 'b'; dst[j++] = 'i'; dst[j++] = 'n'; dst[j++] = '/';
-    }
+    if (name[0] != '/')
+        for (t = "/bin/"; *t; ) dst[j++] = *t++;
     while (name[i] && j < PIPE_FNAME_MAX - 6) {
         c = name[i++];
 #if !defined(PLAT_FLAT32)
@@ -260,8 +260,8 @@ static void pipe_fname(char *dst, const char *name)
 #endif
         dst[j++] = c;
     }
-    dst[j++] = '.'; dst[j++] = 'b'; dst[j++] = 'i'; dst[j++] = 'n';
-    dst[j] = 0;
+    for (t = ".bin"; (dst[j++] = *t++) != 0; )
+        ;
 }
 
 /* プロセス強制終了: 先頭ブロック + 継続ブロック(PID_CONT)を解放する。

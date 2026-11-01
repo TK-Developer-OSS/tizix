@@ -89,8 +89,9 @@ static int cmd_ps(const char *arg)
     /* slot 0 はカーネル + init(z80 / m68k とも sh は外部プロセスで、自分の行に出る)。 */
     kprintf("0 %s (init)\n", (KCURRENT == 0) ? "run" : "rdy");
     for (n = PS_FIRST; n < PS_NSLOT; n++) {
-        /* PID_CONT は複数ブロック / スロットのプロセスの続き(z80、PLAT_FLAT32 は #113 から)。 */
-        if (PIDTBL[n] == 0 || PIDTBL[n] == PID_CONT) continue;  /* free/継続block */
+        /* 0xFB 以上はプロセスではない予約枠: PID_BAD(VRAM など使えないブロック。#259)/ PID_PIPEBUF /
+         * PID_CONT(複数ブロック / スロットのプロセスの続き。z80、PLAT_FLAT32 は #113 から)/ PID_DRIVER。 */
+        if (PIDTBL[n] == 0 || PIDTBL[n] >= PID_BAD) continue;  /* free / 予約 / 継続block */
         kprintf("%u %s %s %s\n", (unsigned int)n,
                (n == KCURRENT) ? "run" : "rdy",
                (const char *)(KW_CMDNAME + (unsigned)n * KW_CMDNAME_LEN),

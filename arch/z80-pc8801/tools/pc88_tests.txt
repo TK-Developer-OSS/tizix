@@ -12,6 +12,7 @@ whoami	root
 uptime	up
 df	free
 ps	(init)
+ps	!7 rdy
 mkdir /root/dd	
 ls /root	DD/
 cp /etc/rc /root/rr	(54 bytes)
@@ -22,4 +23,7 @@ rm /root/rr
 ls /root	!RR
 echo 0123456789	0123456789
 echo a-b=c:d,e.f/g	a-b=c:d,e.f/g
+cat /etc/rc | tail -1	# net
+cat /etc/rc | head -1	tizix startup
+ps | tail -2	2 run sh
 @vitest

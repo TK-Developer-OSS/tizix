@@ -92,11 +92,10 @@ int main(int argc, char **argv)
 
     if (path == 0) {
         if (want < 1) want = 1;
-        if (pipe_tail((unsigned)want) == 0) {
-            puts("tail: needs FILE or pipe");
-            return 1;
-        }
-        return 0;
+        if (pipe_tail((unsigned)want) != 0)
+            return 0;
+        /* `builtin | tail`: sh feeds the right side through the temp file tmp.pip (the kernel pipe is not used). */
+        path = "tmp.pip";
     }
 
     if (tail_file() != 0) {

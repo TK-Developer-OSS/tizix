@@ -510,8 +510,7 @@ void klog_write(const char *msg) __sdcccall(0)
         if (days < ydays) break;
         days -= ydays; y++;
     }
-    m = 1;
-    leap = (unsigned char)((y & 3u) == 0);
+    m = 1;                              /* leap は直前の年ループで y について計算済み */
     while (m <= 12u) {
         dim = klog_days_in_month[m - 1];
         if (m == 2u && leap) dim = 29u;
