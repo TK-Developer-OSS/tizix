@@ -19,6 +19,9 @@
 #include "kmem.h"
 #include "vfs.h"
 #include "dev.h"
+#if defined(ARCH_RPI_PICO)
+#include "gpiodev.h"
+#endif
 #include "io.h"      /* kprintf(vfs_ls_children / vfs_dump) */
 
 
@@ -40,7 +43,11 @@ typedef char kw_vnode_fits[(sizeof(struct vnode) * KW_VTREE_N <= KW_VTREE_SIZE) 
 
 /* 固定ノード数。idx 0..VFIXED-1 は vfs_init が焼く。VFIXED.. が動的 fd 端点。
  * 0="/" 1=/dev 2=/dev/null 3=/dev/fda 4=/dev/fdb */
+#if defined(ARCH_RPI_PICO)
+#define VFIXED  6      /* 5 = /dev/gpio(固定)。3,4 = fda / fdb(SD があるときだけ有効) */
+#else
 #define VFIXED  5
+#endif
 
 /* ---- 小物: 名前コピー(<=11 文字 + NUL)。string.h を増やさない。 ---- */
 static void vname_set(struct vnode *n, const char *s)
@@ -89,9 +96,24 @@ void vfs_init(void)
     VTREE[3].data = (void*)dev_lookup("fda");
     VTREE[4].type = VT_DEV_FDB;  VTREE[4].parent = DEV_IDX; vname_set(&VTREE[4], "fdb");
     VTREE[4].data = (void*)dev_lookup("fdb");
+#if defined(ARCH_RPI_PICO)
+    /* SD カードが無いと fda / fdb は実体を持たない。マウント成功後に vfs_sd_attach()。 */
+    VTREE[3].type = VT_FREE; VTREE[3].parent = VT_NOPARENT; VTREE[3].name[0] = 0;
+    VTREE[4].type = VT_FREE; VTREE[4].parent = VT_NOPARENT; VTREE[4].name[0] = 0;
+    VTREE[5].type = VT_DEV_GPIO; VTREE[5].parent = DEV_IDX; vname_set(&VTREE[5], "gpio");
+    VTREE[5].data = (void*)dev_lookup("gpio");
+#endif
 
     NEXTFD = 0;
 }
+
+#if defined(ARCH_RPI_PICO)
+void vfs_sd_attach(void)
+{
+    VTREE[3].type = VT_DEV_FDA; VTREE[3].parent = DEV_IDX; vname_set(&VTREE[3], "fda");
+    VTREE[4].type = VT_DEV_FDB; VTREE[4].parent = DEV_IDX; vname_set(&VTREE[4], "fdb");
+}
+#endif
 
 /* parent の子で name(先頭コンポーネント)に一致するノード index。無ければ -1。 */
 static int find_child(unsigned char parent, const char *comp)
@@ -101,6 +123,10 @@ static int find_child(unsigned char parent, const char *comp)
         if (VTREE[i].type == VT_FREE) continue;
         if (VTREE[i].parent != parent) continue;
         if (vname_eq(&VTREE[i], comp)) return i;
+#if defined(ARCH_RPI_PICO)
+        /* /dev/gpioN は /dev/gpio の別名(ピン番号はパスから取る。gpio_name_to_pin) */
+        if (VTREE[i].type == VT_DEV_GPIO && gpio_name_to_pin(comp) >= 0) return i;
+#endif
     }
     return -1;
 }

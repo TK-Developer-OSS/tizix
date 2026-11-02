@@ -1,0 +1,6 @@
+{
+  "name": "tizix-rpi-pico-test",
+  "private": true,
+  "description": "tizix rpi-pico の起動回帰(rp2040js 上で kernel.uf2 を回し、USB CDC の出力で判定する)",
+  "dependencies": { "rp2040js": "1.4.0" }
+}

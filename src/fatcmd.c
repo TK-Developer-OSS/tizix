@@ -9,6 +9,9 @@
 #include "kmem.h"       /* KW_LSDIR(kdir 状態) */
 #include "builtin.h"
 #include "fatcmd.h"
+#if defined(ARCH_RPI_PICO)
+#include "gpiodev.h"
+#endif
 #include "vfs.h"        /* VFS 一本化: パスは vfs_resolve で backend 振り分け */
 
 static FATFS fs;                 /* the mounted volume (static: ~560B in TINY) */
@@ -355,10 +358,26 @@ int kfs_rename(const char *src, const char *dst) __sdcccall(0)
 static FIL  redir_fp;
 static unsigned char redir_active = 0;
 
+#if defined(ARCH_RPI_PICO)
+/* "> /dev/gpio[N]": 出力をファイルへ書かず 1 行ためておき、redir_end で gpio_exec に渡す
+ * (echo 1 > /dev/gpio5)。文法は gpiodev.h。 */
+static unsigned char redir_dev;
+static int           redir_pin;                 /* -1 = /dev/gpio(PIN は語の先頭) */
+static char          redir_line[40];
+static unsigned char redir_len;
+#endif
+
 int redir_sink(int c)              /* io.c から直接呼ばれる */
 {
     UINT bw;
     char ch = (char)c;
+#if defined(ARCH_RPI_PICO)
+    if (redir_dev) {
+        if (redir_len < sizeof redir_line - 1)
+            redir_line[redir_len++] = ch;
+        return c;
+    }
+#endif
     f_write(&redir_fp, &ch, 1, &bw);
     return c;
 }
@@ -378,6 +397,24 @@ int redir_begin(const char *fname, unsigned char append)   /* 0=ok, -1=fail */
     fname = KPATH1(fname);          /* cwd 起点で解決(sh は絶対化しない) */
     /* /dev/null は sh 側の discard 経路で捌かれここには来ない。
      * ここへ来る /dev 配下は書けないので弾く(FatFs の生エラーを見せない)。 */
+#if defined(ARCH_RPI_PICO)
+    {
+        int v = vfs_resolve(fname);
+        if (v >= 0 && vfs_node_type(v) == VT_DEV_GPIO) {
+            const char *b = fname, *c;
+            int p;
+            for (c = fname; *c; c++)
+                if (*c == '/') b = c + 1;
+            p = gpio_name_to_pin(b);
+            redir_pin = (p == GPIO_ALL) ? -1 : p;
+            redir_len = 0;
+            redir_dev = 1;
+            redir_active = 1;
+            redir_enable(1);
+            return 0;
+        }
+    }
+#endif
     if (vfs_resolve(fname) != VFS_FAT) {
         kprintf("redir: %s: not a writable file\n", fname);
         return -1;
@@ -395,6 +432,15 @@ void redir_end(void)
 {
     if (redir_active) {
         redir_enable(0);          /* コンソールへ戻す(先に) */
+#if defined(ARCH_RPI_PICO)
+        if (redir_dev) {
+            char out[64];
+            redir_line[redir_len] = 0;
+            redir_dev = 0;
+            if (gpio_exec(redir_pin, redir_line, out, sizeof out))
+                kprintf("%s\n", out);
+        } else
+#endif
         f_close(&redir_fp);
         redir_active = 0;
     }
@@ -492,6 +538,12 @@ void klog_write(const char *msg) __sdcccall(0)
     unsigned char leap, pid, len;
     char pfx[KLOG_PFX_LEN];
 
+#if defined(ARCH_RPI_PICO)
+    {   /* ルートが内蔵 Flash のとき、ログで毎回 4KB を消去しない(寿命)。SD のときだけ書く */
+        extern int disk_is_sd(void);
+        if (!disk_is_sd()) return;
+    }
+#endif
     r = f_open(&fp, KLOG_PATH, FA_WRITE | FA_OPEN_APPEND);
     if (r) return;                      /* /var/log 未整備 (mkfatdisk 側の掟) 等 */
 

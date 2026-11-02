@@ -83,6 +83,8 @@ static unsigned char ufd_kind[NUFD];   /* 0=空き 1=FAT 2=DEVFS(dev_ops) 3=生�
 static int           ufd_bh[NUFD];
 static const struct dev_ops *ufd_ops[NUFD];
 static char iobuf[IOCHUNK];
+/* dev_ops の第 1 引数: 下位 16bit = open の戻り、上位 = 開いている枠の番号 */
+#define UDEVARG(u) ((int)(((unsigned long)(u) << 16) | (unsigned)(ufd_bh[u] & 0xFFFF)))
 static char namebuf[KNAME_MAX];
 
 unsigned long sys_call(unsigned long func, unsigned long a1,
@@ -125,8 +127,10 @@ unsigned long sys_call(unsigned long func, unsigned long a1,
             const struct dev *dv = vn ? (const struct dev *)vn->data : 0;
             if (!dv || !dv->ops)
                 return 0xFFFFFFFFUL;
-            if (dv->ops->open && dv->ops->open(path, (int)a2) < 0)
+            bh = dv->ops->open ? dv->ops->open(path, (int)a2) : 0;
+            if (bh < 0)
                 return 0xFFFFFFFFUL;
+            ufd_bh[u]   = bh;                /* open の戻り(gpio ならピン番号)。read / write / close へ渡す */
             ufd_kind[u] = 2;
             ufd_ops[u]  = dv->ops;
             return u;
@@ -146,7 +150,7 @@ unsigned long sys_call(unsigned long func, unsigned long a1,
             if (ufd_kind[u] == 1)
                 fsb_close(ufd_bh[u]);
             else if (ufd_kind[u] == 2 && ufd_ops[u] && ufd_ops[u]->close)
-                ufd_ops[u]->close(0);
+                ufd_ops[u]->close(UDEVARG(u));
             ufd_kind[u] = 0;
         }
         return 0;
@@ -166,7 +170,7 @@ unsigned long sys_call(unsigned long func, unsigned long a1,
             unsigned chunk = n > IOCHUNK ? IOCHUNK : n;
             int got;
             if (ufd_kind[u] == 2)
-                got = (ufd_ops[u] && ufd_ops[u]->read) ? ufd_ops[u]->read(0, iobuf, chunk) : -1;
+                got = (ufd_ops[u] && ufd_ops[u]->read) ? ufd_ops[u]->read(UDEVARG(u), iobuf, chunk) : -1;
             else
                 got = fsb_read(ufd_bh[u], iobuf, chunk);
             if (got <= 0)
@@ -195,7 +199,7 @@ unsigned long sys_call(unsigned long func, unsigned long a1,
             int wr;
             { unsigned i; for (i = 0; i < chunk; i++) iobuf[i] = src[done + i]; }
             if (ufd_kind[u] == 2)
-                wr = (ufd_ops[u] && ufd_ops[u]->write) ? ufd_ops[u]->write(0, iobuf, chunk) : -1;
+                wr = (ufd_ops[u] && ufd_ops[u]->write) ? ufd_ops[u]->write(UDEVARG(u), iobuf, chunk) : -1;
             else
                 wr = fsb_write(ufd_bh[u], iobuf, chunk);
             if (wr <= 0)

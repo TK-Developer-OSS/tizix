@@ -23,6 +23,11 @@
 #include "builtin.h"
 #include "fatcmd.h"
 #include "vfs.h"
+#if defined(ARCH_RPI_PICO)
+#include "gpiodev.h"
+#include "ff.h"
+extern int disk_is_sd(void);   /* arch/rpi-pico/diskio.c */
+#endif
 #include "kexec.h"      /* kload_driver: DRIVER.BIN を block1 へ常駐ロード */
 
 /* 方針: ビルトインは OS の心臓部(ブート必須 + プロセス操作 = exit/ps/kill、
@@ -186,6 +191,14 @@ void builtin_init(void)
 #endif
     if (fat_init() == 0) {                     /* FR_OK */
         kprintf("FAT Drive DETECTED\n");
+#if defined(ARCH_RPI_PICO)
+        if (disk_is_sd()) {
+            vfs_sd_attach();                   /* /dev/fda・/dev/fdb は SD があるときだけ */
+            kprintf("(root: SD card)\n");
+        } else {
+            kprintf("(root: internal flash)\n");
+        }
+#endif
     } else {
 #if defined(ARCH_X86_IA16) || defined(PLAT_FLAT32)
         /* x86: マウント失敗でもプロンプトは出す(デバッグ継続用)。 */
@@ -226,8 +239,65 @@ void builtin_init(void)
 #endif
 }
 
+#if defined(ARCH_RPI_PICO)
+extern int pico_builtin(const char *cmd, const char *arg);
+extern int pico_builtin_is(const char *cmd);
+
+/* SD も外部コマンド(plat_load が未実装)も無くても /dev を触れるための最小の echo / cat。
+ *   echo 1 > /dev/gpio5     … 出力は sh のリダイレクトが /dev/gpio へ渡す(fatcmd.c)
+ *   cat /dev/gpio5          … /dev/gpio[N] は gpio_read、それ以外は FAT のファイル */
+static int cmd_echo(const char *arg)
+{
+    kprintf("%s\n", arg);
+    return BUILTIN_OK;
+}
+
+static int cmd_cat(const char *arg)
+{
+    static FIL fp;
+    char buf[64];
+    const char *path;
+    UINT br, i;
+    int v;
+
+    if (!arg[0]) {
+        kprintf("usage: cat FILE\n");
+        return BUILTIN_OK;
+    }
+    path = kpath(arg, 0);
+    v = vfs_resolve(path);
+    if (v >= 0 && vfs_node_type(v) == VT_DEV_GPIO) {
+        const char *b = path, *c;
+        char out[512];
+        for (c = path; *c; c++)
+            if (*c == '/') b = c + 1;
+        gpio_read((unsigned)gpio_name_to_pin(b), out, sizeof out);
+        kprintf("%s", out);
+        return BUILTIN_OK;
+    }
+    if (v != VFS_FAT || f_open(&fp, path, FA_READ) != FR_OK) {
+        kprintf("cat: %s: cannot open\n", arg);
+        return BUILTIN_OK;
+    }
+    while (f_read(&fp, buf, sizeof buf, &br) == FR_OK && br) {
+        for (i = 0; i < br; i++)
+            kputchar((unsigned char)buf[i]);
+    }
+    f_close(&fp);
+    return BUILTIN_OK;
+}
+#endif
+
 int builtin_try(const char *cmd, const char *arg)
 {
+#if defined(ARCH_RPI_PICO)
+    {
+        int r = pico_builtin(cmd, arg);        /* arch/rpi-pico/pcmd.c: ls mkdir rm mv cp touch df sync uptime */
+        if (r != BUILTIN_NONE) return r;
+    }
+    if (strcmp(cmd, "echo")    == 0) return cmd_echo(arg);
+    if (strcmp(cmd, "cat")     == 0) return cmd_cat(arg);
+#endif
 #if BUILTIN_DF && !defined(SD_DEBUG)
     if (strcmp(cmd, "df")     == 0) return fat_df(arg);
 #endif
@@ -249,6 +319,11 @@ int builtin_try(const char *cmd, const char *arg)
 int builtin_is(const char *cmd)
 {
     return (strcmp(cmd, "cd")     == 0 ||
+#if defined(ARCH_RPI_PICO)
+            pico_builtin_is(cmd) ||
+            strcmp(cmd, "echo")   == 0 ||
+            strcmp(cmd, "cat")    == 0 ||
+#endif
             strcmp(cmd, "pwd")    == 0 ||
 #if BUILTIN_DF && !defined(SD_DEBUG)
             strcmp(cmd, "df")     == 0 ||

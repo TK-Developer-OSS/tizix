@@ -41,6 +41,7 @@
 #define VT_DEV_UART  4   /* /dev/uart   (将来)                    */
 #define VT_FD        5   /* /dev/fdN    パイプ端点(socket 段で使用) */
 #define VT_DEV_FDA   6   /* /dev/fda  生ブロックデバイス(cpmsim drive A = boot/kernel) */
+#define VT_DEV_GPIO  8   /* /dev/gpio, /dev/gpioN (rpi-pico。dev_ops 経由)        */
 #define VT_DEV_FDB   7   /* /dev/fdb  生ブロックデバイス(cpmsim drive B = FAT ボリューム) */
 
 #define VT_NOPARENT  0xFF   /* 親なし(root)                       */
@@ -95,6 +96,10 @@ int  vfs_alloc_fd(void *bufptr);
 /* パイプ終了時にカーネルが呼ぶ想定(socket 段)。当該 fd ノードを
  * VT_FREE に戻す(スロット再利用可)。番号自体は捨てる(先番号)。 */
 void vfs_free_fd(int idx);
+
+/* rpi-pico: /dev/fda・/dev/fdb は SD カードがマウントできたときだけ現れる。
+ * vfs_init は空き(VT_FREE)にしておき、fat_init 成功後に vfs_sd_attach() で生やす。 */
+void vfs_sd_attach(void);
 
 /* 検証用: vtree の全ノードをフルパスで出力する。
  * 実機で配置(0x8419〜)と初期化を目視確認するための一時コマンド。

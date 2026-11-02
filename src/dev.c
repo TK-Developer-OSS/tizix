@@ -37,11 +37,66 @@ static const struct dev_ops null_ops = {
     null_open, null_read, null_write, null_close, null_ioctl
 };
 
+#if defined(ARCH_RPI_PICO)
+/* /dev/gpio, /dev/gpioN(pico)。open は pin を返し(GPIO_ALL=一覧)、sysfile が
+ * 開いている枠の番号を (slot << 16) で足して read / write / close に渡す。
+ * 読みは 1 回分の文字列を返して EOF(cat が回る)。書きは 1 write = 1 命令。 */
+#include "gpiodev.h"
+#define GPIO_NSLOT 6
+static unsigned char gpio_rdone[GPIO_NSLOT];
+
+static int gpio_open(const char *path, int flags)
+{
+    const char *c = path, *last = path;
+    int p;
+    (void)flags;
+    for (; *c; c++)
+        if (*c == '/') last = c + 1;
+    p = gpio_name_to_pin(last);
+    if (p < 0)
+        return -1;
+    return p;
+}
+static int gpio_rd(int fd, void *buf, unsigned n)
+{
+    char tmp[512];
+    unsigned slot = (unsigned)fd >> 16, pin = (unsigned)fd & 0xFFFF, len, i;
+    if (slot >= GPIO_NSLOT || gpio_rdone[slot])
+        return 0;
+    gpio_rdone[slot] = 1;
+    len = (unsigned)gpio_read(pin, tmp, sizeof tmp);
+    if (len > n) len = n;
+    for (i = 0; i < len; i++) ((char *)buf)[i] = tmp[i];
+    return (int)len;
+}
+static int gpio_wr(int fd, const void *buf, unsigned n)
+{
+    char line[40], out[64];
+    unsigned pin = (unsigned)fd & 0xFFFF, i;
+    if (n >= sizeof line) return -1;
+    for (i = 0; i < n; i++) line[i] = ((const char *)buf)[i];
+    line[n] = 0;
+    return gpio_exec(pin == GPIO_ALL ? -1 : (int)pin, line, out, sizeof out) ? -1 : (int)n;
+}
+static int gpio_cl(int fd)
+{
+    unsigned slot = (unsigned)fd >> 16;
+    if (slot < GPIO_NSLOT) gpio_rdone[slot] = 0;
+    return 0;
+}
+static const struct dev_ops gpio_ops = {
+    gpio_open, gpio_rd, gpio_wr, gpio_cl, null_ioctl
+};
+#endif
+
 #if !defined(ARCH_X86_IA16)
 /* x86-ia16 以外は (B) を使う。dev_ops 版の fda は持たず、(A) の表は null だけ
  * (#32 で z80pack / z80board が (B) へ移行。m68k-mega 以降のポートも同じ)。 */
 static const struct dev dev_tbl[] = {
     { "null", &null_ops },
+#if defined(ARCH_RPI_PICO)
+    { "gpio", &gpio_ops },
+#endif
     { 0, 0 }
 };
 #else
