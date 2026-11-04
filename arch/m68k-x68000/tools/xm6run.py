@@ -218,12 +218,12 @@ def vitest():
     name = "/root/vt%d" % (int(time.time()) % 100000)
     mark = len(console() or "")
     type_line("vi " + name)
-    if not waitfor("-- INSERT --|" + re.escape(name), 30):
+    if not waitfor(r"\[INSERT\]|" + re.escape(name), 30):
         print("FAIL  @vitest: vi did not start")
         return False
     time.sleep(1.5)
     key("i")
-    if not waitfor("-- INSERT --", 20):
+    if not waitfor(r"\[INSERT\]", 20):
         print("FAIL  @vitest: no INSERT mode")
         return False
     for c in "hello":

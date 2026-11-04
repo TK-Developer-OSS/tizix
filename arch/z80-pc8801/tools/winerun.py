@@ -380,7 +380,7 @@ def vitest():
     time.sleep(1.5)
     type_line("i", ret=False)
     if not waitfor("INSERT", 30):
-        print("FAIL vi: -- INSERT -- にならない")
+        print("FAIL vi: [INSERT] にならない")
         return False
     time.sleep(3)
     for c in "hello":
@@ -399,7 +399,7 @@ def vitest():
     time.sleep(3)
     # ESC 単体は getc_timeout の時間切れで確定する。CON_RXRDY が常に真だと次のキーまで確定せず INSERT が残る。
     if any("INSERT" in l for l in (screen() or [])):
-        print("FAIL vi: Escape の後も -- INSERT -- が残る(ESC が次のキーまで確定しない)")
+        print("FAIL vi: Escape の後も [INSERT] が残る(ESC が次のキーまで確定しない)")
         return False
     for c in ":wq":
         type_line(c, ret=False)

@@ -34,10 +34,19 @@ void con_log_init(void)
         CONLOG->magic[i] = m[i];
 }
 
+static unsigned char esc_st;    /* 0 = text, 1 = after ESC, 2 = after ESC [ */
+
 void con_putc(char c)
 {
     CONLOG->buf[CONLOG->total % CONLOG_SIZE] = (unsigned char)c;
     CONLOG->total++;
+    /* The IOCS console ignores a bare ESC[H (no parameters); send ESC[1;1H instead */
+    if (esc_st == 2 && c == 'H') {
+        iocs_call(IOCS_B_PUTC, '1', 0, 0, 0);
+        iocs_call(IOCS_B_PUTC, ';', 0, 0, 0);
+        iocs_call(IOCS_B_PUTC, '1', 0, 0, 0);
+    }
+    esc_st = (c == 0x1B) ? 1 : (esc_st == 1 && c == '[') ? 2 : 0;
     iocs_call(IOCS_B_PUTC, (unsigned char)c, 0, 0, 0);
 }
 
