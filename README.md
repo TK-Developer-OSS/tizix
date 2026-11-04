@@ -41,6 +41,7 @@ BLK ST CMD ARGS
 | `z80board` | A homebrew Z80 board (32KB ROM + SD card, FT245 USB serial) | Works on the real board. The regression suite also runs on the z80boardsim simulator |
 | `z80-pc8801` | NEC PC-8801 (Z80, 5.25" floppy, text VRAM console) on the M88 emulator | Boots to the shell with the FAT disk, `vi` and the usual commands. Pipes are stubbed out for now (the kernel code area is tight). Not tried on real hardware. The regression suite (23 tests) runs on M88 under Wine |
 | `m68k-mega` | A bare MC68000 with an Arduino Mega2560 driving its bus (1MB SRAM, SD card) | Works on the real board (shell, pipes, background jobs, XMODEM). Simulator: m68ksim |
+| `m68k-x68000` | Sharp X68000 (MC68000, 1MB RAM minimum, 2HD floppy) on XM6G with a real IPL-ROM | Boots from a 2HD floppy image to the shell: FAT12 read/write, `vi`, pipes, background jobs and `kill`. Console and disk go through the ROM's IOCS, so no X68000 hardware is programmed directly. Not tried on real hardware yet. The regression suite (27 tests) runs on XM6G under Wine and reads the console from the emulator's memory |
 | `esp32-wroom-32e` | A single ESP32 (ESP32-WROOM-32E, Xtensa LX6, 4MB flash with a FAT16 disk in it) | Boots on the real board: shell, FAT, WiFi, MCP server, GPIO and friends. The regression suite runs on Espressif's QEMU (WiFi is real-hardware only) |
 | `rpi-pico` | Raspberry Pi Pico W (RP2040, dual Cortex-M0+, 264KB SRAM) with an optional SD card on SPI0 | Works on the real board: boots to the shell over the USB serial console. The root is the FAT SD card if one is present, otherwise a 1MB writable FAT in the Pico's own flash, so no SD card is required; `/dev/gpio` and `/dev/gpioN` drive the pins (`echo 1 > /dev/gpio5`, `cat /dev/gpio5`). Core 0 handles the hardware and the Wi-Fi chip, core 1 runs tizix. Only the original Pico W (RP2040) has been tried so far; more boards in the Pico family are planned. No simulator, no regression suite yet |
 | `x86-ia16` | 16-bit real-mode x86 (386 or later; PC BIOS), QEMU and real hardware (VGA text screen + PS/2 keyboard; COM1 too if the machine has one) | Boots from a floppy, a hard disk or an SD card (BIOS INT 13h). The shell, `vi`, pipes and background jobs work. Process slots and 4KB memory blocks are sized from the memory found at boot. Tried on a ThinkPad R40 (USB floppy). The regression suite runs on QEMU (floppy and IDE-disk boot) |
@@ -121,6 +122,7 @@ We develop on Ubuntu 24.04 (the commands below assume it too).
 | `z80board` | SDCC 4.5.0 (same as above) | `z80boardsim` from the z80pack fork | a ROM writer (32KB kernel ROM), `dd` for the SD card image |
 | `z80-pc8801` | SDCC 4.5.0 (same as above) | [M88](http://retropc.net/cisc/m88/) (a Windows PC-8801 emulator) under Wine + Xvfb, driven by `arch/z80-pc8801/tools/winerun.py`. The emulator and the PC-8801 ROM images aren't in this repo | — (not tried) |
 | `m68k-mega` | m68k-elf binutils + gcc 8.3.0 (`m68k-elf-gcc`, `m68k-elf-ld`, `m68k-elf-objcopy`) | `m68ksim` (built from this tree; needs rocket68, see below) | the Arduino AVR toolchain (avr-gcc, avrdude) and Windows PowerShell for `arch/m68k-mega/arduino/`, `dd` for the SD card image |
+| `m68k-x68000` | m68k-elf binutils + gcc 8.3.0 (same as `m68k-mega`; this Makefile looks in `~/tools/m68k/bin`, or wherever `M68K=` points) | XM6G (XM6 Type G) under Wine + Xvfb, driven by `arch/m68k-x68000/tools/xm6run.py`. XM6G and the ROM images (`IPLROM.DAT`, `CGROM.DAT`) aren't in this repo | a 2HD floppy drive (or a floppy emulator) for the `.xdf` image |
 | `esp32-wroom-32e` | Espressif's `xtensa-esp32-elf-gcc` (crosstool-NG, GCC 16.1.0) and `esptool`. For WiFi you also need Espressif's WiFi binaries and lwIP 2.2.0 (not in this repo; without them it builds without WiFi) | Espressif's QEMU, `qemu-system-xtensa -machine esp32` (`make -C arch/esp32-wroom-32e run`, Ctrl-A x to quit) | `esptool` to write `flash.bin` (4MB: kernel image at 0x1000, disk at 0x100000) to the module |
 | `rpi-pico` | `arm-none-eabi-gcc`, CMake and the [Pico SDK](https://github.com/raspberrypi/pico-sdk) (point `PICO_SDK_PATH` at it). The SDK headers are needed for the commands too, not just the kernel | — (none yet) | an SD card module on SPI0 is optional (MISO GP16, CS GP17, SCK GP18, MOSI GP19); copy `kernel.uf2` onto the Pico in BOOTSEL mode, write `sdcard.img` to the card with `dd` or over XMODEM (see below) |
 | `x86-ia16` | ia16-elf-gcc 6.3.0 + binutils, mtools, dosfstools | `qemu-system-i386` (`make ARCH=x86-ia16 clean all run`, Ctrl-] to quit) | a USB floppy drive (or an SD card / USB stick) to `dd` `disk/floppy.img` onto, and a BIOS-boot PC |
@@ -223,6 +225,23 @@ Download M88 (the "M88p2 for Windows" build) from [retropc.net/cisc/m88](http://
 
 You don't need `M88.ini`; M88 writes one itself. (We once hit a page fault with a hand-placed one, cause unknown, so leave it out.) `winerun.py boot` copies the disk images from `arch/z80-pc8801/disks/` into this directory as `tizix_a.d88` / `tizix_b.d88` every time, so those two files are overwritten. `winerun.py` uses podman if it's there and plain host Wine if not; either way it draws on a virtual display (`:99`) and never touches your real screen.
 
+**`m68k-x68000`, running the tests: Wine + Xvfb**
+
+```sh
+sudo apt install wine xvfb xdotool imagemagick mtools dosfstools
+```
+
+XM6G (the Type G build of XM6) is a Windows program that Wine runs as it is. The harness looks for it in `~/tools/xm6/` (set `XM6_DIR` to change that), together with two ROM images that are not in this repo and not ours to hand out:
+
+```
+~/tools/xm6/
+├── xm6g.exe
+├── IPLROM.DAT   the X68000 IPL-ROM (128KB)
+└── CGROM.DAT    the character generator ROM
+```
+
+XM6G shows a compatibility warning when the CGROM is not a genuine one; the harness clicks "continue" for you. `xm6run.py` starts XM6G on its own virtual display (`:98`, `X68K_DISPLAY` to change) and never touches your real screen, keyboard or mouse. It doesn't read the screen either: the kernel keeps a copy of everything it prints in a 4KB ring at `$0FF000`, and the script reads that ring out of the XM6G process memory (read-only). Wine must be able to open `/proc/<pid>/mem`, which is the case when the harness started XM6G itself.
+
 **Where the images for real hardware end up**
 
 Paths are from the top of the tree, after `make ARCH=<arch>`. `build/` and the images are git-ignored, so they're never in the checkout; you always build them.
@@ -233,6 +252,7 @@ Paths are from the top of the tree, after `make ARCH=<arch>`. `build/` and the i
 | | SD card image (4MB) | `arch/z80board/sdcard.img` | `dd` to the whole SD device (Rufus "DD image" on Windows); `make ARCH=z80board flash` prints the same steps |
 | `m68k-mega` | kernel, as a C array for the Arduino sketch | `arch/m68k-mega/rom.h`, copied into `arch/m68k-mega/arduino/MEGA2560_68000_DTACK_TEST/` | build and upload that sketch to the Mega2560 (the kernel lives in the sketch, not on the card) |
 | | SD card image (32MB, optional) | `build/arch/m68k-mega/obj/disk.img` | `dd` to the SD device |
+| `m68k-x68000` | 2HD floppy image (1,261,568 bytes, FAT12, 1024-byte sectors) | `build/arch/m68k-x68000/obj/disk.xdf` | open it in XM6G's FDD0, or write it to a real 2HD disk (the boot sector is a normal X68000 one, so any tool that writes `.xdf` images will do) |
 | `esp32-wroom-32e` | the whole 4MB flash (kernel at 0x1000, FAT disk at 0x100000) | `build/arch/esp32-wroom-32e/obj/flash.bin` | `esptool --chip esp32 -p /dev/ttyUSB0 write-flash 0x0 flash.bin` (the Makefile's `make ARCH=esp32-wroom-32e flash PORT=...` writes the same pieces, but is marked untested there) |
 | `rpi-pico` | firmware | `kernel.uf2` at the top of the tree (copied from `arch/rpi-pico/build/`) | BOOTSEL, then copy it to the Pico's drive |
 | | SD card image (32MB) | `arch/rpi-pico/sdcard.img` | `dd` to the SD device, or from the running Pico: press `x` in the 16-second boot countdown and send it by XMODEM |
@@ -291,12 +311,20 @@ python3 -u winerun.py boot                    # boot tizix on M88 (about a minut
 python3 -u winerun.py tests pc88_tests.txt    # RESULT: n / m PASS (23 / 23 at the moment)
 ```
 
+X68000 (XM6G and the ROM images in `~/tools/xm6`):
+
+```sh
+make ARCH=m68k-x68000
+python3 -u arch/m68k-x68000/tools/xm6run.py tests arch/m68k-x68000/tools/x68k_tests.txt   # n passed, 0 failed
+```
+
 ## What's where
 
 | Path | What's inside |
 |---|---|
 | `src/` | The kernel every target shares (scheduler, kexec, VFS, pipes, FatFs) |
 | `arch/<arch>/` | Per-target code (startup, console, disk, Makefile) |
+| `arch/m68k-x68000/` | Sharp X68000 port (boot sector, IOCS console and disk, tests, `XM6.md`) |
 | `arch/m68k-mega/arduino/` | Firmware for the Arduino Mega2560 that drives the 68000's bus |
 | `arch/rpi-pico/` | Raspberry Pi Pico W port. The kernel is built with CMake against the Pico SDK (`CMakeLists.txt`); the Makefile drives that and builds the commands and the SD card image |
 | `user/` | Source for the commands, `sh` included |
@@ -309,6 +337,7 @@ python3 -u winerun.py tests pc88_tests.txt    # RESULT: n / m PASS (23 / 23 at t
 - File names play by FAT rules: **case doesn't matter**, and it's **8.3 names only** (long file names are turned off, `FF_USE_LFN 0`). `README.TXT` and `readme.txt` are the same file, and files you create on tizix end up in upper case (for example, `ls /root` shows `HISTORY`).
 - A command line can be 48 characters at most.
 - Only one pipe at a time, and at most 4KB goes through it (anything past that gets cut off).
+- m68k-x68000: it needs a 1MB X68000 at least, and it relies on the ROM's IOCS (console, floppy, and the 100Hz Timer-C tick), so it only boots from FDD0 with the IPL-ROM present. Details, the boot sequence and the IOCS facts we verified are in `arch/m68k-x68000/XM6.md`. Only FDD0 is a FAT volume: no hard disk, no RTC (the clock starts at 1970-01-01), RAM above 1MB is unused. It has only been run on XM6G, never on a real X68000. Other emulators (XEiJ, MAME, the MiSTer core) haven't been tried; reports are welcome. tizix doesn't use Human68k at all: it boots straight from the floppy's boot sector and talks to the ROM's IOCS, so Human68k programs won't run on it and it isn't a Human68k replacement.
 - m68k-mega: the Mega firmware's timer (Timer5) has to tick at the same rate as the kernel's `TICK_HZ` (25 by default).
 
 ## Credits
@@ -326,6 +355,10 @@ tizix stands on the shoulders of others. Big thanks to:
 - **[FatFs](https://elm-chan.org/fsw/ff/)** by ChaN — the FAT file system module tizix uses (`src/ff*`).
 - **[z80pack](https://github.com/udo-munk/z80pack)** by Udo Munk — the Z80 simulator (cpmsim) our z80pack / z80board simulators are forked from.
 - **[rocket68](https://github.com/habedi/rocket68)** by Hassan Abedi — the MC68000 CPU core inside m68ksim.
+- **[M88](http://retropc.net/cisc/m88/)** by cisc — the PC-8801 emulator the `z80-pc8801` port is developed and tested on.
+- **j80** (PC-8000 series emulator) by Shigekazu HIRAO (HAL8999) — we used it for our PC-8001 experiments (a ROM boot loader, the PC-8012-02 RAM board).
+- **XM6** by PI. (2001-2006, and again since 2022) and **XM6 TypeG** by GIMONS — the X68000 emulator the `m68k-x68000` port is developed and tested on. PI. also published the XM6 source, which we read to check how the FDC and the disk behave.
+- **[QEMU](https://www.qemu.org/)** and Espressif's fork of it (`qemu-system-xtensa -machine esp32`) — the simulator behind the `esp32-wroom-32e` regression tests; the plain QEMU also runs the `x86-ia16` ones.
 - **[SDCC](https://sdcc.sourceforge.net/)** — the Small Device C Compiler, for the Z80 kernel and tools.
 - **[GCC](https://gcc.gnu.org/)** and **[GNU Binutils](https://www.gnu.org/software/binutils/)** — the m68k-elf toolchain and the host compiler.
 - **[mtools](https://www.gnu.org/software/mtools/)** and **[dosfstools](https://github.com/dosfstools/dosfstools)** — for building the FAT disk images.

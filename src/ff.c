@@ -3388,6 +3388,9 @@ static UINT check_fs (	/* 0:FAT/FAT32 VBR, 1:exFAT VBR, 2:Not FAT and valid BS, 
 	if (sign == 0xAA55 && !memcmp(fs->win + BS_JmpBoot, "\xEB\x76\x90" "EXFAT   ", 11)) return 1;	/* It is an exFAT VBR */
 #endif
 	b = fs->win[BS_JmpBoot];
+#ifdef FF_JMPBOOT_BRA68K
+	if (b == 0x60) b = 0xEB;	/* X68000 boot sectors start with a 68000 bra.s ($60) instead of an x86 jump */
+#endif
 	if (b == 0xEB || b == 0xE9 || b == 0xE8) {	/* Valid JumpBoot code? (short jump, near jump or near call) */
 		if (sign == 0xAA55 && !memcmp(fs->win + BS_FilSysType32, "FAT32   ", 8)) {
 			return 0;	/* It is an FAT32 VBR */

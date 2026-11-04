@@ -1,0 +1,36 @@
+# arch/m68k-x68000 regression (xm6run.py tests). One line = command<TAB>text the output must contain
+# expected: empty = no output / !text = must not contain / otherwise must contain
+date	1970-01-01
+echo hello	hello
+echo a b c	a b c
+ls /	bin/
+ls /bin	sh.bin
+cat /etc/rc	rsyslog rc-ok
+head /etc/rc	tizix startup
+tail /etc/rc	rsyslog rc-ok
+wc /etc/rc	/etc/rc
+whoami	root
+uptime	up
+df	free
+ps	(init)
+ps	!7 rdy
+mkdir /root/dd	
+ls /root	dd/
+cp /etc/rc /root/rr	bytes
+cat /root/rr	rc-ok
+touch /root/tt	
+ls /root	tt
+rm /root/rr	
+ls /root	!rr
+echo 0123456789	0123456789
+echo a-b=c:d,e.f/g;(x)	a-b=c:d,e.f/g;(x)
+cat /etc/rc | tail -1	rc-ok
+cat /etc/rc | head -1	tizix startup
+ps | tail -2	sh
+sleep 2	
+uptime	up
+sleep 60 &	
+ps	~\n2 (rdy|run) sleep
+kill 2	killed 2
+ps	!sleep
+@vitest

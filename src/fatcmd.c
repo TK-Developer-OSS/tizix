@@ -621,7 +621,11 @@ unsigned long kfs_df(unsigned sel) __sdcccall(0)
 
     if (f_getfree("", &nclst, &fp) != FR_OK) return 0xFFFFFFFFUL;
     if (sel == 0) nclst = fp->n_fatent - 2;
+#if FF_MAX_SS == 1024
+    return nclst * fp->csize;            /* 1KB sectors (X68000 2HD) */
+#else
     return (nclst * fp->csize) >> 1;
+#endif
 }
 
 /* 旧ビルトイン df(表示までカーネルでやっていた版)。#56 で /bin/df + kfs_df に
