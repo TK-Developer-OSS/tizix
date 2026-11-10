@@ -20,6 +20,7 @@ arch/m68k-mega/rom.h
 arch/z80board/z80boardsim
 
 *.asm
+!mcu-low/**/*.asm
 *.rel
 *.bin
 *.lst

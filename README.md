@@ -318,6 +318,18 @@ make ARCH=m68k-x68000
 python3 -u arch/m68k-x68000/tools/xm6run.py tests arch/m68k-x68000/tools/x68k_tests.txt   # n passed, 0 failed
 ```
 
+tizix-mcu / mcu-low (no emulator of the whole system; the Uno test needs the board, the PIC tests need `gputils` and `gpsim`):
+
+```sh
+make ARCH=avr-uno test      # Uno: serial smoke test against the real board on /dev/ttyACM0 (close the terminal first)
+make ARCH=mcu-low test      # PIC12F683, nothing but the PC: the reference machine, the tzsh converter and the host command
+                            #   (mcu-low/vm/test_vm.py, mcu-low/host/test_tzlow.py), then the firmware in gpsim:
+                            #   vm_test.py (programs run), node_test.py (the bare link), link_test.py (link + machine together)
+make ARCH=mcu-low linktest  # only the link + machine test
+```
+
+Each prints `ok` / `FAIL` lines and `0 failure(s)` at the end. A new bytecode instruction goes into `mcu-low/vm/nodevm.py` (reference) first, then `vm.asm`, and the same program must give the same pin edges in both.
+
 ## What's where
 
 | Path | What's inside |
@@ -393,6 +405,64 @@ Why put tizix on an x86 PC at all, when Linux and the BSDs run there just fine? 
 - **Serial**: an interrupt-driven 16550 driver for COM1 and COM2 with receive buffers, so waiting programs sleep instead of spinning, and a paste does not lose bytes. The console and the modem share it; `sercon off` hands COM1 over to a modem on a machine with one serial port.
 - **Networking through an RS-232C modem**, the way a PC of that era would: `ntpdate`, `curl`, `telnet` dial out with `ATDT host:port`, and `telnetd` answers incoming calls (`RING` / `ATA`) and shares the console with the caller. A Raspberry Pi with a USB serial adapter running `python/at_modem.py --serial /dev/ttyUSB0 --listen 2323` stands in for a WiFi modem.
 - **Looking after it from a distance**: files go over the serial line by XMODEM (`rx`), `sysup` rewrites the boot area (boot sector, stage2, kernel) after checking the disk format, and `reboot` restarts through INT 19h without going through the BIOS POST (a machine with a dead CMOS battery would otherwise wait for F1). `arch/x86-i386-unreal/tools/t105_update.py` puts this together: send what changed, rewrite the kernel, reboot, wait for the prompt. `tools/test_interactive.py` runs the same regression suite on QEMU or, with `TIZIX_SERIAL=/dev/ttyS0`, on the real machine over the cable.
+
+## About tizix-mcu (microcontrollers)
+
+A separate, tiny line of tizix for microcontrollers, in [`mcu/`](mcu). It shares no source with `src/`: there is no kernel, no file system and no process model, only a shell, a few builtin commands, a script interpreter and the peripherals as nodes under `/dev`. The first target is the Arduino Uno / Nano (ATmega328P: 32KB flash, 2KB RAM). The point is the same skill everywhere: devices hang under `/dev`, and `echo 1 > /dev/gpio/13` works on the Uno the way it will on a PIC and on the main tizix. Details: [mcu/README.md](mcu/README.md).
+
+**Why it exists.** A script is longer than the same thing in C or assembler, and that is the price: in return the same script means the same thing on every chip (an interpreter on the Uno, compact bytecode on a PIC, `tzsh` on the main tizix), so nothing has to be rewritten per part. The smallest parts (PIC12F class, DIP-8) are a separate line, [`mcu-low/`](mcu-low) (see below): bytecode in EEPROM, a tiny virtual machine in assembler, and a host command that makes them look like tizix.
+
+A feature joins the language only if every target can express it or a `config.h` switch can leave it out.
+
+**Build, write, talk to it** (an Uno on `/dev/ttyACM0`; `PORT=` changes it; needs `avr-gcc`, `avrdude`, `picocom`):
+
+```
+make ARCH=avr-uno             # build, with the flash size (limit 32256 bytes, under Optiboot)
+make ARCH=avr-uno flash       # write it through the Optiboot bootloader
+make ARCH=avr-uno run         # flash, then open the console (leave picocom with Ctrl-A Ctrl-X)
+make ARCH=avr-uno test        # serial smoke test against the real board
+```
+
+Only one program can hold the serial port: close the terminal before `flash` or `test`.
+
+**What you see at the prompt.**
+
+```
+[/]# ls                      # everything, recursively, in columns: /bin/…  /blink.sh  /dev/gpio/2 …
+[/]# cat /blink.sh           # a baked-in script's text
+[/]# echo 1 > /dev/gpio/13   # drive pin D13 (0, 1, in, up); cat /dev/gpio/13 reads it
+[/]# echo 500 > /dev/timer/0/limit    # timer 0: limit (ms), finish (flag), repeat (0 one-shot, 1 periodic)
+[/]# tzsh blink.sh           # run a script (also tzsh /blink.sh); Ctrl-C stops it
+```
+
+**The script language (`tzsh`).** C-like control around shell-like commands, values are strings (numbers are 16 bit, only where you add or compare):
+
+```
+setup { echo 1 > /dev/timer/0/repeat; echo 500 > /dev/timer/0/limit; }   // once
+intr  { echo 0 > /dev/timer/0/finish; if (/dev/gpio/13 == "0") { echo 1 > /dev/gpio/13; } else { echo 0 > /dev/gpio/13; } }
+loop  { n = n + 1; if (n == 1000) { echo "1000 rounds"; n = 0; } }       // forever; write it last
+```
+
+`intr` runs between statements after the timer finishes (the interrupt itself only raises `/dev/timer/0/finish`). `while`, `if / else if / else`, `break`, `exit`, `NAME = value [+|- value]` and `> /dev/...` are the rest. The source is [user/tzsh/tzsh_core.c](user/tzsh/tzsh_core.c); [user/tzsh/conformance/mcu.sh](user/tzsh/conformance/mcu.sh) is its self-test, run on the board by `make ARCH=avr-uno test`.
+
+**Your own scripts.** Put a `.sh` file in `mcu/scripts/` and add it to `SCRIPT_FILES` in `mcu/avr-uno/Makefile`; it is baked into flash under its file name and shows up in `ls` as `/NAME.sh`. (Sending a script to the board without rebuilding is planned, task #363.)
+
+**Configuration (planned).** Today every feature is built in: about 17KB of the 32KB flash and 564 bytes of RAM. To reach smaller parts (PIC16/12 class), each target will get a `config.h` that switches features on and off with `#define`s (the shell, `ls`/`cat`, the interpreter, `intr`, background jobs, a log) and sets limits (`NVARS`, `VALLEN`); a disabled feature removes its code, tables and RAM. A menuconfig-style TUI that writes `config.h` is planned after that (tasks #365, #367). Background jobs with a boot-time `run.sh` are task #364, and a ring log is #366.
+
+## About tizix-mcu-low (PIC12F class)
+
+For parts with no room for a shell or an interpreter (RAM of a hundred bytes, an 8-deep stack), in [`mcu-low/`](mcu-low). The script is compiled on the PC to **4-bit-opcode bytecode** (one byte per instruction: the upper nibble is the operation, the lower the operand), stored in the chip's **EEPROM** and run by a small **virtual machine written in assembler**. The same `.sh` that runs on the Uno (a subset of `tzsh`: `setup / intr / loop`, `echo` to `/dev/gpio/N` and `/dev/timer/0/*`, `if / else`, counters, messages) turns into 17 to 51 bytes for a blink. The first target is the **PIC12F683** (the PIC16F84A is next); parts without EEPROM are out.
+
+- **One wire.** The host talks to the chip over a single pin (GP2), 500 baud 8N1, half duplex: the host is master, a frame is a command byte (bit 7 = write, low 7 bits = node) plus a value byte for a write, and the chip answers with exactly one byte. Nodes 0 to 6 are the machine's bit nodes (`gpio/0,1,4,5,3`, `timer/0/finish`, `timer/0/repeat`); `0x20/0x21` is the EEPROM pointer and data, `0x22` the output ring, `0x23` stop / restart.
+- **Size.** `vm.asm` (machine and link in one firmware) is 790 of 2048 words; the A/D converter is not implemented yet.
+- **Host command.** [`mcu-low/host/tzlow.py`](mcu-low/host/tzlow.py) (Python, pyserial): `ls`, `cat PATH`, `echo V > PATH`, `load FILE.sh|.s` (compile, write to EEPROM, read back, restart), `dump`, `stop`, `start`, and a `[pic]# ` prompt when run with no command. The wiring: USB serial RX on the line, TX through 1k to 4.7k onto the line (the host hears its own bytes and skips them). Writing the firmware to a real chip is not wired up yet (`make flash` is a placeholder; no PICkit2 tool here), and the host has not been tried on hardware.
+
+```
+make ARCH=mcu-low                          # assemble the machine (vm), the bare link (node) and the first blink; prints words used
+make ARCH=mcu-low DEVICE=pic12f683 size    # DEVICE= picks the chip (a directory in mcu-low/)
+make ARCH=mcu-low run                      # the host command against a pretend device on this PC (no hardware)
+make ARCH=mcu-low run PORT=/dev/ttyUSB0    # ... or against a chip on the link
+```
 
 ## License
 

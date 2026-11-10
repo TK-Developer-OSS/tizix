@@ -1,0 +1,11 @@
+load s blink.cod
+break c 300000
+run
+x gpio
+break c 700000
+run
+x gpio
+break c 1100000
+run
+x gpio
+quit

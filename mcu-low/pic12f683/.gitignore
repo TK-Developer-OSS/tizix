@@ -1,0 +1,9 @@
+*.hex
+*.cod
+*.lst
+node.log
+node_run.stc
+prog.inc
+vm_run.stc
+link.log
+link_run.stc
