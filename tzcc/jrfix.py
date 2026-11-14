@@ -80,7 +80,7 @@ def main():
     # 覗き穴最適化を先に 1 回だけ掛ける(peep.py)。
     #   ASTZ の入口がここしか無いので Makefile を 4 箇所直すよりここから呼ぶ。
     #   **jr の範囲修正より先**でなければならない(畳むと距離が縮む)。
-    npeep_cmp, npeep_ldde, npeep_cp, npeep_andor = peep.run(asm)
+    npeep_cmp, npeep_ldde, npeep_cp, npeep_andor, npeep_ix = peep.run(asm)
 
     fixed_total = 0
     seq_id = 900000
@@ -98,9 +98,9 @@ def main():
             if fixed_total:
                 print(f"jrfix.py: {fixed_total} out-of-range jr made indirect "
                       f"(converged in {it - 1} iteration(s)) -> {rel}")
-            if npeep_cmp or npeep_ldde or npeep_cp or npeep_andor:
+            if npeep_cmp or npeep_ldde or npeep_cp or npeep_andor or npeep_ix:
                 print(f"peep.py: {npeep_cmp} cmp + {npeep_ldde} ld-de"
-                      f" + {npeep_cp} cp + {npeep_andor} &&/|| collapsed -> {asm}")
+                      f" + {npeep_cp} cp + {npeep_andor} &&/|| + {npeep_ix} ix-reload collapsed -> {asm}")
             return 0
 
         lines = io.open(asm, encoding="utf-8").read().split('\n')

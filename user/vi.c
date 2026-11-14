@@ -606,34 +606,28 @@ static void ex_line(void)
     scr_row = TROWS + 1;
     scr_col = 1;
     mvcur();
-    esc("[K");
-    putchar(':');
+    esc("[K:");
     stold = 0xFF;       /* 24 行目を自分で上書きしたので必ず引き直す */
 
     for (;;) {
         ex_c = getkey();
-        if (ex_c == 27) {                       /* ESC = 取り消し */
-            excmd[0] = 0;
-            return;
-        }
-        if (ex_c == '\r' || ex_c == '\n') break;
-        if (ex_c == 8 || ex_c == 127) {         /* BS */
-            if (ex_n == 0) {
-                excmd[0] = 0;
-                return;
+        if (ex_c == '\r' || ex_c == '\n') return;
+        if (ex_c == 8 || ex_c == 127) {         /* BS。空なら取り消し */
+            if (ex_n == 0) ex_c = 27;
+            else {
+                ex_n--;
+                excmd[ex_n] = 0;
+                prs("\b \b");
             }
-            ex_n--;
-            excmd[ex_n] = 0;
-            putchar(8);
-            putchar(' ');
-            putchar(8);
-            continue;
-        }
-        if (ex_c >= 32 && ex_c < 127 && ex_n < 6) {
-            excmd[ex_n] = (char)ex_c;
+        } else if (ex_c >= 32 && ex_c < 127 && ex_n < 6) {
+            excmd[ex_n] = ex_c;
             ex_n++;
             excmd[ex_n] = 0;
             putchar(ex_c);
+        }
+        if (ex_c == 27) {                       /* ESC = 取り消し */
+            excmd[0] = 0;
+            return;
         }
     }
 }

@@ -341,6 +341,97 @@ def collapse_andor(lines):
     return lines, n
 
 
+IXG = ['push de', 'ld ix, #tzc_vb+128', 'push iy', 'pop de', 'add ix, de', 'pop de']
+_IXWORD = re.compile(r'\bix\b')
+
+
+def collapse_ixreload(lines):
+    """Drop the IX reload after a call when nothing reads IX before the next reload.
+       The group  push de / ld ix,#tzc_vb+128 / push iy / pop de / add ix,de / pop de  (11B)
+       follows every call.  It is dead when every path from it reaches a reload (or `ret`)
+       before any mention of IX: a label is a no-op for this forward scan (other entries into
+       it do not matter), `jr cc,L` follows both the target and the fall-through, `jr L`
+       follows the target.  Anything unknown (jp, djnz, a missing label) keeps the group.
+       The group preserves DE/HL/AF, so removing it changes only IX."""
+    pos = {}
+    for k, ln in enumerate(lines):
+        t = ln.split(';', 1)[0].strip()
+        if t.endswith(':'):
+            pos[t[:-1]] = k
+    jr = re.compile(r'^jr (?:(?:z|nz|c|nc), )?(\S+)$')
+
+    def dead_from(k, seen):
+        while k < len(lines):
+            if k in seen:
+                return True
+            seen.add(k)
+            t = lines[k].split(';', 1)[0].strip()
+            if t == '' or t.startswith('.') or t.endswith(':'):
+                k += 1
+                continue
+            if t == 'push de' and lines[k + 1].split(';', 1)[0].strip() == IXG[1]:
+                return True
+            if t == IXG[1] or t == 'ret':
+                return True
+            if _IXWORD.search(t):
+                return False
+            m = jr.match(t)
+            if m:
+                if m.group(1) not in pos:
+                    return False
+                if not dead_from(pos[m.group(1)], seen):
+                    return False
+                if not t.startswith('jr ') or ',' not in t:
+                    return True               # unconditional: no fall-through
+                k += 1
+                continue
+            if t.startswith(('j', 'djnz')):
+                return False
+            k += 1
+        return True
+
+    out = []
+    n = 0
+    i = 0
+    L = len(lines)
+    while i < L:
+        if i + 6 <= L and [x.split(';', 1)[0].strip() for x in lines[i:i + 6]] == IXG \
+                and dead_from(i + 6, set()):
+            n += 1
+            i += 6
+            continue
+        out.append(lines[i])
+        i += 1
+    return out, n
+
+
+CALLG = ['push af', 'push de', None, 'push iy', 'pop de', 'add hl, de', 'pop de', 'pop af',
+         'call ___sdcc_call_hl']
+
+
+def collapse_callsave(lines):
+    """Drop the AF/DE save around the callee address computation.
+       push af / push de / ld hl,#F / push iy / pop de / add hl,de / pop de / pop af / call ___sdcc_call_hl
+       The callee may break AF/BC/DE/HL (tzcc passes every argument on the stack and returns in
+       HL / DE:HL, see tzcovl.s), so nothing in AF/DE is live into the call: saving them across
+       the address computation that directly precedes it is dead work (4B per call)."""
+    out = []
+    n = 0
+    i = 0
+    L = len(lines)
+    while i < L:
+        if i + 9 <= L:
+            w = [x.split(';', 1)[0].strip() for x in lines[i:i + 9]]
+            if all(c is None or c == t for c, t in zip(CALLG, w)) and w[2].startswith('ld hl, #'):
+                out.extend(lines[i + 2:i + 6])
+                out.extend([lines[i + 8]])
+                n += 1
+                i += 9
+                continue
+        out.append(lines[i])
+        i += 1
+    return out, n
+
 def run(path):
     """path(.s)を in-place で畳む。(比較, ld de, cp, &&/||) それぞれの件数を返す。"""
     lines = io.open(path, encoding="utf-8").read().split('\n')
@@ -348,11 +439,15 @@ def run(path):
     lines, nd = collapse_ldde(lines)
     lines, nc = collapse_cp(lines)
     lines, na = collapse_andor(lines)
-    if nb or nd or nc or na:
+    import os
+    lines, ni = (lines, 0) if os.environ.get("TZ_NOIX") else collapse_ixreload(lines)
+    lines, ns = collapse_callsave(lines)
+    ni += ns
+    if nb or nd or nc or na or ni:
         io.open(path, "w", encoding="utf-8", newline='\n').write('\n'.join(lines))
-    return nb, nd, nc, na
+    return nb, nd, nc, na, ni
 
 
 if __name__ == '__main__':
     for p in sys.argv[1:]:
-        print("peep.py: %s: cmp=%d ldde=%d cp=%d andor=%d" % ((p,) + run(p)))
+        print("peep.py: %s: cmp=%d ldde=%d cp=%d andor=%d ix=%d" % ((p,) + run(p)))
