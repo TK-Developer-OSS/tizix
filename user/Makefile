@@ -52,7 +52,8 @@ OBJ := ../build/arch/$(ARCH)/user
 #   0x1000 以下かで判る(超えると **ビルドは通り、実行時に飛ぶ**ので要注意)。
 OPTOFF     := --nogcse --noinvariant --nolabelopt --noloopreverse --nooverlay
 CFLAGS_CMD := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
-              $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=19 -DNO_HISTORY)
+              $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=19 -DNO_HISTORY) \
+              $(if $(filter msx,$(ARCH)),-DNO_HISTORY)
 CFLAGS_DRV := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
               $(if $(filter z80board,$(ARCH)),-DARCH_Z80BOARD) \
               $(if $(filter z80-pc8801,$(ARCH)),-DARCH_PC8801)

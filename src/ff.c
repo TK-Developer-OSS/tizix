@@ -5046,7 +5046,7 @@ FRESULT f_getfree (
 /* API: Truncate File                                                    */
 /*-----------------------------------------------------------------------*/
 
-#ifndef ARCH_Z80_PC8801	/* kernel never calls f_truncate; saves ~0.5KB under the 0x8000 limit */
+#if !defined(ARCH_Z80_PC8801) && !defined(ARCH_Z80_MSX)	/* kernel never calls f_truncate; saves ~0.5KB under the 0x8000 limit */
 FRESULT f_truncate (
 	FIL* fp		/* Pointer to the file object */
 )

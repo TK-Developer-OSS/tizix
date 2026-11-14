@@ -1,0 +1,4 @@
+# tizix startup (line<48B)
+hwclock
+rsyslog boot-ok
+# net &

@@ -42,6 +42,7 @@ BLK ST CMD ARGS
 | `z80-pc8801` | NEC PC-8801 (Z80, 5.25" floppy, text VRAM console) on the M88 emulator | Boots to the shell with the FAT disk, `vi` and the usual commands. Pipes are stubbed out for now (the kernel code area is tight). Not tried on real hardware. The regression suite (23 tests) runs on M88 under Wine |
 | `m68k-mega` | A bare MC68000 with an Arduino Mega2560 driving its bus (1MB SRAM, SD card) | Works on the real board (shell, pipes, background jobs, XMODEM). Simulator: m68ksim |
 | `m68k-x68000` | Sharp X68000 (MC68000, 1MB RAM minimum, 2HD floppy) on XM6G with a real IPL-ROM | Boots from a 2HD floppy image to the shell: FAT12 read/write, `vi`, pipes, background jobs and `kill`. Console and disk go through the ROM's IOCS, so no X68000 hardware is programmed directly. Not tried on real hardware yet. The regression suite (27 tests) runs on XM6G under Wine and reads the console from the emulator's memory |
+| `msx` | MSX2 (Z80, 64KB RAM, 3.5" 2DD floppy with the machine's own disk ROM, 80-column text screen) on openMSX | Boots to the shell: FAT12 read/write, `vi`, `date` (the clock is set from the RP-5C01 at boot), pipes and background jobs. A 128KB-VRAM machine gets a sector cache in the spare VRAM, which is what keeps typing from dropping keys (see [the section below](#about-the-msx-port)). Not tried on real hardware yet |
 | `esp32-wroom-32e` | A single ESP32 (ESP32-WROOM-32E, Xtensa LX6, 4MB flash with a FAT16 disk in it) | Boots on the real board: shell, FAT, WiFi, MCP server, GPIO and friends. The regression suite runs on Espressif's QEMU (WiFi is real-hardware only) |
 | `rpi-pico` | Raspberry Pi Pico W (RP2040, dual Cortex-M0+, 264KB SRAM) with an optional SD card on SPI0 | Works on the real board: boots to the shell over the USB serial console. The root is the FAT SD card if one is present, otherwise a 1MB writable FAT in the Pico's own flash, so no SD card is required; `/dev/gpio` and `/dev/gpioN` drive the pins (`echo 1 > /dev/gpio5`, `cat /dev/gpio5`). Core 0 handles the hardware and the Wi-Fi chip, core 1 runs tizix. Only the original Pico W (RP2040) has been tried so far; more boards in the Pico family are planned. No simulator, no regression suite yet |
 | `x86-ia16` | 16-bit real-mode x86 (386 or later; PC BIOS), QEMU and real hardware (VGA text screen + PS/2 keyboard; COM1 too if the machine has one) | Boots from a floppy, a hard disk or an SD card (BIOS INT 13h). The shell, `vi`, pipes and background jobs work. Process slots and 4KB memory blocks are sized from the memory found at boot. Tried on a ThinkPad R40 (USB floppy). The regression suite runs on QEMU (floppy and IDE-disk boot) |
@@ -121,6 +122,7 @@ We develop on Ubuntu 24.04 (the commands below assume it too).
 | `z80pack` | SDCC 4.5.0 (`sdcc`, `sdasz80`, `sdldz80`, `sdar`, `makebin`); tzcc gets built from `tzcc/` | `cpmsim` and `receive` from the z80pack fork | — |
 | `z80board` | SDCC 4.5.0 (same as above) | `z80boardsim` from the z80pack fork | a ROM writer (32KB kernel ROM), `dd` for the SD card image |
 | `z80-pc8801` | SDCC 4.5.0 (same as above) | [M88](http://retropc.net/cisc/m88/) (a Windows PC-8801 emulator) under Wine + Xvfb, driven by `arch/z80-pc8801/tools/winerun.py`. The emulator and the PC-8801 ROM images aren't in this repo | — (not tried) |
+| `msx` | SDCC 4.5.0 (same as above) | [openMSX](https://openmsx.org/) with the C-BIOS ROMs (`make ARCH=msx run`; the machine file and a stand-in disk ROM are built from `arch/msx/emu/`, no commercial ROM is needed) | a 2DD floppy drive (or a floppy emulator) for `disks/tizix.dsk` — not tried |
 | `m68k-mega` | m68k-elf binutils + gcc 8.3.0 (`m68k-elf-gcc`, `m68k-elf-ld`, `m68k-elf-objcopy`) | `m68ksim` (built from this tree; needs rocket68, see below) | the Arduino AVR toolchain (avr-gcc, avrdude) and Windows PowerShell for `arch/m68k-mega/arduino/`, `dd` for the SD card image |
 | `m68k-x68000` | m68k-elf binutils + gcc 8.3.0 (same as `m68k-mega`; this Makefile looks in `~/tools/m68k/bin`, or wherever `M68K=` points) | XM6G (XM6 Type G) under Wine + Xvfb, driven by `arch/m68k-x68000/tools/xm6run.py`. XM6G and the ROM images (`IPLROM.DAT`, `CGROM.DAT`) aren't in this repo | a 2HD floppy drive (or a floppy emulator) for the `.xdf` image |
 | `esp32-wroom-32e` | Espressif's `xtensa-esp32-elf-gcc` (crosstool-NG, GCC 16.1.0) and `esptool`. For WiFi you also need Espressif's WiFi binaries and lwIP 2.2.0 (not in this repo; without them it builds without WiFi) | Espressif's QEMU, `qemu-system-xtensa -machine esp32` (`make -C arch/esp32-wroom-32e run`, Ctrl-A x to quit) | `esptool` to write `flash.bin` (4MB: kernel image at 0x1000, disk at 0x100000) to the module |
@@ -283,6 +285,7 @@ Anything that touches real hardware (dd'ing an SD card, burning ROMs, flashing t
 make run                          # z80pack: boot in cpmsim
 make ARCH=z80board run            # z80board: boot in z80boardsim
 (cd arch/z80-pc8801/tools && python3 -u winerun.py boot)   # z80-pc8801: boot in M88 under Wine + Xvfb (after make ARCH=z80-pc8801; see Testing)
+make ARCH=msx run                 # msx: boot in openMSX (after make ARCH=msx)
 make ARCH=m68k-mega run           # m68k-mega: boot in m68ksim (Ctrl+] to quit)
 make ARCH=esp32-wroom-32e run     # esp32: boot in Espressif's QEMU (Ctrl-A x to quit)
 ```
@@ -376,6 +379,16 @@ tizix stands on the shoulders of others. Big thanks to:
 - **[mtools](https://www.gnu.org/software/mtools/)** and **[dosfstools](https://github.com/dosfstools/dosfstools)** — for building the FAT disk images.
 - **[Arduino](https://www.arduino.cc/)** (AVR core, avr-gcc, avrdude) — for the Mega2560 bus-host firmware.
 - **[FUZIX](https://github.com/EtchedPixels/FUZIX)** — for the inspiration.
+
+## About the msx port
+
+MSX2 with 64KB of RAM and a 3.5" 2DD floppy (720KB, FAT12). It uses the machine's own disk ROM (DSKIO) for the disk and the BIOS only to set up the 80-column text screen, so it needs a disk interface in the machine and nothing else. `make ARCH=msx` builds `arch/msx/msx2-64kb-2dd/disks/tizix.dsk`; `make ARCH=msx run` starts openMSX with it.
+
+- **Boot.** The boot sector loads `s2` (sector 1), which installs a small disk trampoline at 0x8C78, reads the kernel (sectors 2-65) through it into RAM below 0x8000 and jumps in. The trampoline switches pages 0 and 1 to the BIOS ROM and the disk ROM for each DSKIO call and back to RAM afterwards, so the kernel keeps all 64KB.
+- **Console.** The name table of SCREEN 0 is written straight through the VDP ports. Keys are scanned from the vblank interrupt (60Hz) out of the keyboard matrix; the cursor keys are turned into `ESC [ A/B/C/D` so `vi` and the shell history work. No key repeat, no kana.
+- **Why there is a sector cache.** The disk ROM keeps interrupts off for the whole of a DSKIO call (0.2-0.3 s for even one sector), and a key pressed and released inside that window is never seen. A command load is 8-10 such calls, so keys were dropped badly after `vi`, `date` and `:`. On a machine with 128KB of VRAM (MSX2 normally has it) the 80-column text screen leaves about 96KB of VRAM unused; tizix keeps recently read sectors there (192 slots, write-through, tags at 0x07000). A sector that is in the cache is copied from VRAM in a few milliseconds without calling the disk ROM at all. The first run of a command still loads from the disk; later runs do not. With 64KB of VRAM the cache switches itself off and everything works as before, just with the drops.
+- **Limits.** The cache doesn't notice a floppy being swapped; reboot after changing disks. 50Hz machines run the clock 17% slow (`TICK_HZ` is 60). Only MSX2/2+ is the target (MSX1 later; the R800 of the turboR isn't one). Real hardware hasn't been tried.
+- **`vi`.** The first `:` after starting `vi` still loads the `:`-line overlay from the disk (interrupts are off for about 0.4 s), so type the rest of the command after a moment; the second `:` and everything after is served from the cache.
 
 ## About the x86-ia16 port
 

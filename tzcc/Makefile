@@ -251,7 +251,7 @@ tizixcmd: $(TARGET) $(BUILD)/crt0_tizix.rel $(BUILD)/libtzc.lib $(if $(OVLVEC),$
 #   TIZIX_USERBIN が指す先（既定 $(TIZIX_ROOT)/build/arch/z80pack/user）へ .bin を置く。
 #   tizix 側 mkfatdisk.sh がそこを glob して driveb.dsk /bin へ載せる。
 TIZIX_USERBIN ?= $(TIZIX_ROOT)/build/arch/z80pack/user
-TIZIX_CMDS    ?= calli cat cp date dd df du echo free grep head history id ls mkdir mv rm rmdir rsyslog sed sleep spawn spawnc tail tee touch uname uniq uptime wc whoami
+TIZIX_CMDS    ?= calli cat cp date dd df du echo free grep head history hwclock id ls mkdir mv rm rmdir rsyslog sed sleep spawn spawnc tail tee touch uname uniq uptime wc whoami
 # オーバーレイ → core ベクタ (#36 続き) を持つコマンド。「名前:OVLVEC 番地」。
 #   番地はオーバーレイ領域の直下(OVLADDR - 24)。a43eb6c で ovlmain にベクタを
 #   足したが通常ビルドへ配線されておらず、test_ovl が `make` 経由だと落ちていた。

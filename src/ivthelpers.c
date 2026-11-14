@@ -57,7 +57,7 @@ unsigned long _divulong(unsigned long a, unsigned long b){
 	     if(rem>=b){rem=(u32)(rem-b); a|=1;} } while(--i);
 	return a;
 }
-#ifndef ARCH_Z80_PC8801	/* unused in the PC-8801 kernel; saves bytes under the 0x8000 limit */
+#if !defined(ARCH_Z80_PC8801) && !defined(ARCH_Z80_MSX)	/* unused in the PC-8801 and MSX kernels; saves bytes under the 0x8000 limit */
 unsigned long _modulong(unsigned long a, unsigned long b){
 	u32 rem=0; u8 i=32;
 	do { rem=(u32)(rem<<1); if(a&0x80000000UL)rem|=1; a=(u32)(a<<1);
@@ -74,7 +74,7 @@ long _mullong(long a, long b){
 /* char 変種: int 版へ委譲(返り値昇格は SDCC 規約どおり) */
 unsigned int _divuchar(unsigned char a, unsigned char b){ return _divuint((u16)a,(u16)b); }
 unsigned int _moduchar(unsigned char a, unsigned char b){ return _moduint((u16)a,(u16)b); }
-#ifndef ARCH_Z80_PC8801
+#if !defined(ARCH_Z80_PC8801) && !defined(ARCH_Z80_MSX)
 int _divschar(signed char a, signed char b){ return _divsint((int)a,(int)b); }
 int _modschar(signed char a, signed char b){ return _modsint((int)a,(int)b); }
 unsigned int _muluchar(unsigned char a, unsigned char b){ return (unsigned int)_mulint((int)(u16)a,(int)(u16)b); }

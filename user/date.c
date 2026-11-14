@@ -79,12 +79,15 @@ void main(void)
     t = read_epoch();
 
     /* 32bit を使うのはここだけ。以降は 16bit で足りる。 */
+    /* 日数は桁で切る: 86400 の 10^4 / 10^3 / 10^2 / 10 / 1 倍を、大きいほうから引く。
+     * 1 日ずつ引くと今日の日付で約 2 万回(tzcc の 32bit 引き算は遅く、MSX で十数秒かかった)、
+     * 桁で切れば高々 4 + 9*4 回。10^4 倍 = 864000000 は 32bit に収まる。 */
     days = 0;
-    for (;;) {
-        if (t < 86400UL) break;
-        t -= 86400UL;
-        days++;
-    }
+    while (t >= 864000000UL) { t -= 864000000UL; days += 10000u; }
+    while (t >= 86400000UL)  { t -= 86400000UL;  days += 1000u; }
+    while (t >= 8640000UL)   { t -= 8640000UL;   days += 100u; }
+    while (t >= 864000UL)    { t -= 864000UL;    days += 10u; }
+    while (t >= 86400UL)     { t -= 86400UL;     days++; }
     rem_sec = (unsigned)t;
 
     hh = 0;
