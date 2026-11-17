@@ -2,7 +2,7 @@
 
 A scratch-built, preemptive multitasking OS for Z80 and beyond (8-bit & 16-bit retro CPUs), engineered to thrive in just 32KB of RAM. Inspired by FUZIX, coded by AI.
 
-It's a tiny UNIX-like OS for CPUs without an MMU. It runs on the Z80, the 68000, the ESP32 and the Raspberry Pi Pico W — in simulators, and on real boards too.
+It's a tiny UNIX-like OS for CPUs without an MMU. It runs on the Z80, the 68000, the ESP32, the Raspberry Pi Pico W and RISC-V (RV32, on an FPGA soft core) — in simulators, and on real boards too.
 
 **The star of the show: a real `vi`, running right on the machine.** A full-screen, modal editor (80×24) with insert and command modes, counted `dd` / `yy` and put, undo, and `:w` / `:q` / `:q!` / `:wq` / `:x`. On the Z80 it's compiled with our own C compiler and squeezed into just 12KB — three 4KB blocks — using overlays. Edit your files on an 8-bit machine, no host PC needed.
 
@@ -47,6 +47,8 @@ BLK ST CMD ARGS
 | `rpi-pico` | Raspberry Pi Pico W (RP2040, dual Cortex-M0+, 264KB SRAM) with an optional SD card on SPI0 | Works on the real board: boots to the shell over the USB serial console. The root is the FAT SD card if one is present, otherwise a 1MB writable FAT in the Pico's own flash, so no SD card is required; `/dev/gpio` and `/dev/gpioN` drive the pins (`echo 1 > /dev/gpio5`, `cat /dev/gpio5`). Core 0 handles the hardware and the Wi-Fi chip, core 1 runs tizix. Only the original Pico W (RP2040) has been tried so far; more boards in the Pico family are planned. No simulator, no regression suite yet |
 | `x86-ia16` | 16-bit real-mode x86 (386 or later; PC BIOS), QEMU and real hardware (VGA text screen + PS/2 keyboard; COM1 too if the machine has one) | Boots from a floppy, a hard disk or an SD card (BIOS INT 13h). The shell, `vi`, pipes and background jobs work. Process slots and 4KB memory blocks are sized from the memory found at boot. Tried on a ThinkPad R40 (USB floppy). The regression suite runs on QEMU (floppy and IDE-disk boot) |
 | `x86-i386-unreal` | x86 PCs with a 386 or later and 4MB of memory or more, in unreal mode (real mode that can reach all 4GB; see [the section below](#about-the-x86-i386-unreal-port-unreal-mode)). QEMU and real hardware | Grew out of `x86-ia16`. The kernel's C is compiled by tzcc. Boots from a floppy; the shell, `vi`, pipes, XMODEM, an interrupt-driven serial driver, networking through an RS-232C modem (including `telnetd` for dial-in) and updating itself over the serial line work. Tried on a Dell PowerEdge T105 (USB floppy, 2GB). The regression suite runs on QEMU (128MB) and, over a serial cable, on the real machine |
+| `rv32-qemu` | RV32IM in machine mode on QEMU's `virt` machine (`qemu-system-riscv32 -bios none`) | Boots to the shell: external commands (loaded and relocated at run time), pipes, preemption, FAT read/write on a RAM disk. A first step for the FPGA port below; the regression suite runs on QEMU |
+| `rv32-fpga-papiliolx6` | A Papilio Pro (Spartan-6 XC6SLX9) running the [NEORV32](https://github.com/stnolting/neorv32) RISC-V soft core, with the board's 8MB SDRAM (a Micron MT48LC4M16) behind a PSRAM-style controller. Also simulated in Verilator | Works on the real board at 100MHz (64MHz and 96MHz also tried; 32MHz is the plain version): boots to the shell with the usual commands, pipes and a FAT RAM disk. A 689-byte boot loader in block RAM takes the kernel and the disk image over the UART (about 1 second at 2Mbaud, 12 seconds at 115200). See [the section below](#about-the-rv32-ports-risc-v-and-fpga) |
 
 ## How it's put together
 
@@ -129,6 +131,8 @@ We develop on Ubuntu 24.04 (the commands below assume it too).
 | `rpi-pico` | `arm-none-eabi-gcc`, CMake and the [Pico SDK](https://github.com/raspberrypi/pico-sdk) (point `PICO_SDK_PATH` at it). The SDK headers are needed for the commands too, not just the kernel | — (none yet) | an SD card module on SPI0 is optional (MISO GP16, CS GP17, SCK GP18, MOSI GP19); copy `kernel.uf2` onto the Pico in BOOTSEL mode, write `sdcard.img` to the card with `dd` or over XMODEM (see below) |
 | `x86-ia16` | ia16-elf-gcc 6.3.0 + binutils, mtools, dosfstools | `qemu-system-i386` (`make ARCH=x86-ia16 clean all run`, Ctrl-] to quit) | a USB floppy drive (or an SD card / USB stick) to `dd` `disk/floppy.img` onto, and a BIOS-boot PC |
 | `x86-i386-unreal` | ia16-elf-gcc 6.3.0 + binutils (preprocessor, assembler, linker, and the commands), tzcc (built from `tzcc/`) for the kernel, mtools, dosfstools | `qemu-system-i386 -m 128` (`arch/x86-i386-unreal/tz/check.sh` builds and boots the tzcc kernel) | a USB floppy drive to `dd` `disk/floppy_tz.img` onto and a BIOS-boot PC with a 386 or later and 4MB+. For networking: a serial cable and a Hayes-style modem (a Raspberry Pi with a USB serial adapter running `python/at_modem.py --serial` stands in for a WiFi modem); lrzsz (`sx`) for sending files by XMODEM |
+| `rv32-qemu` | `riscv64-unknown-elf-gcc` (builds with `-march=rv32im_zicsr -mabi=ilp32`) | `qemu-system-riscv32` (`make ARCH=rv32-qemu run`, Ctrl-A x to quit; `python3 python/test_rv32_qemu.py` runs the regression suite) | — |
+| `rv32-fpga-papiliolx6` | `riscv64-unknown-elf-gcc` for the kernel and the commands. For the FPGA: [GHDL](https://github.com/ghdl/ghdl) (turns NEORV32's VHDL into Verilog), a copy of NEORV32 (we used commit 87c8c98; set `N32=` to where it is), and Xilinx ISE 14.7 (the last ISE, the only one that knows Spartan-6; it runs fine under Wine) | [Verilator](https://www.veripool.org/verilator/) 5.x (`fpga/build_sim.sh`, then `python3 python/test_rv32_fpga_sim.py`, about 3 minutes) | a Papilio Pro and [openFPGALoader](https://github.com/trabucayre/openFPGALoader) (`-c ft2232 --ftdi-channel 0`) to write the bitstream. The UART is the board's USB serial port, channel B |
 
 Two things you'll have to get yourself — they're not in this repo:
 
@@ -378,6 +382,7 @@ tizix stands on the shoulders of others. Big thanks to:
 - **[GCC](https://gcc.gnu.org/)** and **[GNU Binutils](https://www.gnu.org/software/binutils/)** — the m68k-elf toolchain and the host compiler.
 - **[mtools](https://www.gnu.org/software/mtools/)** and **[dosfstools](https://github.com/dosfstools/dosfstools)** — for building the FAT disk images.
 - **[Arduino](https://www.arduino.cc/)** (AVR core, avr-gcc, avrdude) — for the Mega2560 bus-host firmware.
+- **[NEORV32](https://github.com/stnolting/neorv32)** by Stephan Nolting — the RISC-V soft core the `rv32-fpga-papiliolx6` port runs on; **[GHDL](https://github.com/ghdl/ghdl)**, **[Verilator](https://www.veripool.org/verilator/)** and **[openFPGALoader](https://github.com/trabucayre/openFPGALoader)** — turning it into Verilog, simulating it and writing the bitstream. The Papilio Pro is a board by Gadget Factory.
 - **[FUZIX](https://github.com/EtchedPixels/FUZIX)** — for the inspiration.
 
 ## About the msx port
@@ -476,6 +481,32 @@ make ARCH=mcu-low DEVICE=pic12f683 size    # DEVICE= picks the chip (a directory
 make ARCH=mcu-low run                      # the host command against a pretend device on this PC (no hardware)
 make ARCH=mcu-low run PORT=/dev/ttyUSB0    # ... or against a chip on the link
 ```
+
+## About the rv32 ports (RISC-V and FPGA)
+
+The kernel and the commands are the shared ones (`src/`, `user/`); only `console.c`, `kmain.c`, `crt0.S`, `plat.h` and a few small files are per-target. Everything runs in RISC-V machine mode (processes too, like the 68000 in supervisor mode). Commands are linked twice at different addresses, and `tools/mkcmd.py` builds a relocation table from the words that differ, so a command can be loaded anywhere (the code is PC-relative).
+
+`rv32-qemu` is the quick one: `make ARCH=rv32-qemu run`. It is also what the FPGA kernel was shaken out on.
+
+**`rv32-fpga-papiliolx6`** is tizix on a soft core, no CPU chip involved:
+
+- **The core** is NEORV32 (RV32IM, machine timer, UART0). `fpga/tizix_top.vhd` wraps it; GHDL turns it into Verilog because ISE's XST cannot read VHDL-2008.
+- **The memory** is the board's SDRAM, 8MB, behind `fpga/sdram_psram.v`: to the CPU it is just a big RAM that answers after a few clocks (initialisation, refresh, opening and closing rows, bursts are all hidden). It does not keep rows open, so every access is about 12 clocks. `fpga/sdram_model.v` is a behavioural SDRAM that checks the controller's command sequence in simulation (init order, tRCD, refresh interval).
+- **The boot loader** (`fpga/loader/`, 689 bytes in block RAM) fills the SDRAM with zeros (the FAT code relies on free space being zero), prints `TZLD`, then takes `W addr len data xor` frames from `tools/upload.py` and jumps to the kernel on `G`. `R` reads memory back and `C` sets the SDRAM capture beat; `tools/memtest.py` uses them to test the SDRAM from the host.
+- **The clock** comes from a PLL (32MHz × `PLL_MULT` / `PLL_DIV`): 32, 64, 96 and 100MHz have all been run on a real Papilio Pro. 100MHz is about the limit: place and route leaves 0.67ns of slack, and an SDR SDRAM at CL2 is 100MHz at best. The UART can run at 115200 or 2Mbaud (`BAUD=` and `UART_BAUD=`).
+- **One thing to know about real SDRAM**: the read data comes back one clock earlier than a naive model says. The controller's capture beat is a register (`0xF0000000`), and on this board 2 is the only value that gives clean reads at every clock we tried.
+
+To build and run (paths in the scripts are those of our machine; the `N32`, `CLK` and `BAUD` environment variables and the output directory argument change them):
+
+```
+fpga/build_ise.sh /path/to/out                 # CLK=100000000 BAUD=2000000 for the fast version; makes top.bit
+make ARCH=rv32-fpga-papiliolx6 CLK_HZ=100000000 UART_BAUD=2000000 OBJ=../../build/arch/rv32-fpga-papiliolx6/obj-100mhz-2m
+openFPGALoader -c ft2232 --ftdi-channel 0 /path/to/out/top.bit
+python3 tools/upload.py <obj>/kernel.bin <obj>/disk.img --port /dev/ttyUSB1 --baud 2000000   # start this first, then write the bitstream: the loader prints TZLD only after a reset
+python3 -m serial.tools.miniterm /dev/ttyUSB1 2000000                                          # the shell (Ctrl-] to quit)
+```
+
+Not done yet: booting without a host (the SPI flash on the board could hold the kernel and disk), a persistent disk (SD card), and a data cache or an open-row policy for the SDRAM, which is where most of the remaining speed is.
 
 ## License
 
