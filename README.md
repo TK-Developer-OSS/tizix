@@ -503,7 +503,7 @@ fpga/build_ise.sh /path/to/out                 # CLK=100000000 BAUD=2000000 for 
 make ARCH=rv32-fpga-papiliolx6 CLK_HZ=100000000 UART_BAUD=2000000 OBJ=../../build/arch/rv32-fpga-papiliolx6/obj-100mhz-2m
 openFPGALoader -c ft2232 --ftdi-channel 0 /path/to/out/top.bit
 python3 tools/upload.py <obj>/kernel.bin <obj>/disk.img --port /dev/ttyUSB1 --baud 2000000   # start this first, then write the bitstream: the loader prints TZLD only after a reset
-python3 -m serial.tools.miniterm --eol CR /dev/ttyUSB1 2000000                                 # the shell (Ctrl-] to quit)
+python3 -m serial.tools.miniterm --raw --eol CR /dev/ttyUSB1 2000000                           # the shell (Ctrl-] to quit)
 ```
 
 Not done yet: booting without a host (the SPI flash on the board could hold the kernel and disk), a persistent disk (SD card), and a data cache or an open-row policy for the SDRAM, which is where most of the remaining speed is.
