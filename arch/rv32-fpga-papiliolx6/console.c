@@ -34,9 +34,15 @@ void con_init(void)
 /* move the UART FIFO into the receive buffer (called from both the interrupt and the reader; the caller closes interrupts) */
 static void drain(void)
 {
+	static unsigned char prev;	/* the previous byte from the UART (to drop the LF of a CR+LF pair) */
 	while (!(R32(0) & CTRL_RX_EMPTY)) {
 		unsigned char c = (unsigned char)R32(8);
 		unsigned short n = (rhead + 1) & (RING - 1);
+		if (c == '\n' && prev == '\r') {	/* terminals such as miniterm send CR+LF for Enter: take it as one */
+			prev = 0;
+			continue;
+		}
+		prev = c;
 		if (n != rtail) {	/* drop the byte when the ring is full */
 			ring[rhead] = c;
 			rhead = n;
