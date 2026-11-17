@@ -153,6 +153,8 @@ make ARCH=z80board        # the z80board ROM image
 make ARCH=m68k-mega       # m68k-mega: kernel, m68ksim and the disk image
 make ARCH=rpi-pico        # rpi-pico: kernel.uf2 (copied to the top of the tree) and arch/rpi-pico/sdcard.img
 make -C arch/x86-i386-unreal -f Makefile.tz OBJ=obj/tz IMG=disk/floppy_tz.img   # x86-i386-unreal: tzcc kernel + commands
+make ARCH=rv32-qemu       # rv32-qemu: kernel.elf and disk.img
+make ARCH=rv32-fpga-papiliolx6 CLK_HZ=100000000 UART_BAUD=2000000 OBJ=../../build/arch/rv32-fpga-papiliolx6/obj-100mhz-2m   # rv32-fpga-papiliolx6: kernel.bin and disk.img for the board (run it from arch/rv32-fpga-papiliolx6; with no arguments it builds the 10MHz simulation version). The bitstream is a separate step: fpga/build_ise.sh
 ```
 
 ### Hint: installing the build tools
@@ -262,6 +264,8 @@ Paths are from the top of the tree, after `make ARCH=<arch>`. `build/` and the i
 | `esp32-wroom-32e` | the whole 4MB flash (kernel at 0x1000, FAT disk at 0x100000) | `build/arch/esp32-wroom-32e/obj/flash.bin` | `esptool --chip esp32 -p /dev/ttyUSB0 write-flash 0x0 flash.bin` (the Makefile's `make ARCH=esp32-wroom-32e flash PORT=...` writes the same pieces, but is marked untested there) |
 | `rpi-pico` | firmware | `kernel.uf2` at the top of the tree (copied from `arch/rpi-pico/build/`) | BOOTSEL, then copy it to the Pico's drive |
 | | SD card image (32MB) | `arch/rpi-pico/sdcard.img` | `dd` to the SD device, or from the running Pico: press `x` in the 16-second boot countdown and send it by XMODEM |
+| `rv32-fpga-papiliolx6` | the bitstream (the CPU, the SDRAM controller and the boot loader) | `top.bit` in the directory you gave `fpga/build_ise.sh` | `openFPGALoader -c ft2232 --ftdi-channel 0 top.bit` over the Papilio's USB (writes the FPGA's RAM, so it is gone at power-off) |
+| | kernel and disk image | `kernel.bin`, `disk.img` in the `OBJ=` directory | `tools/upload.py` over the UART, after every reset (start it first; the loader prints `TZLD` only after a reset) |
 
 Before you `dd` anything, check the device name with `lsblk`. A wrong `of=` wipes a disk.
 
@@ -292,6 +296,7 @@ make ARCH=z80board run            # z80board: boot in z80boardsim
 make ARCH=msx run                 # msx: boot in openMSX (after make ARCH=msx)
 make ARCH=m68k-mega run           # m68k-mega: boot in m68ksim (Ctrl+] to quit)
 make ARCH=esp32-wroom-32e run     # esp32: boot in Espressif's QEMU (Ctrl-A x to quit)
+make ARCH=rv32-qemu run           # rv32-qemu: boot in qemu-system-riscv32 (Ctrl-A x to quit)
 ```
 
 **Raspberry Pi Pico W** (`rpi-pico`) has no simulator; it runs on the real board. Hold BOOTSEL while plugging it in and copy `kernel.uf2` to the drive that shows up. The console is the Pico's USB serial port (USB CDC; any terminal program will do). After boot there's a 16-second countdown: press `x` during it to enter the XMODEM SD flasher, then send `sdcard.img` with XMODEM (CRC) from the terminal. It writes the image raw to the SD card from sector 0 and reboots, so you can update the card without pulling it out.
@@ -307,6 +312,15 @@ sh python/run_regress.sh          # the regression suite: pty tests on z80pack (
 sh python/run_regress.sh --clean  # start over with a fresh disk image
 TIZIX_ARCH=z80board python3 python/test_args.py   # most tests run on z80board too
 python3 python/test_args.py m68k-mega             # cross-target tests take the target as an argument
+```
+
+RISC-V: `rv32-qemu` boots on QEMU and runs eight shell checks (command load and relocation, pipes, `sleep`/`uptime`, a FAT write); `rv32-fpga-papiliolx6` runs the same kind of checks on the whole soft core in Verilator (the CPU converted by GHDL, a behavioural SDRAM, a UART model; about 3 minutes). Neither is part of `run_regress.sh` yet:
+
+```sh
+python3 python/test_rv32_qemu.py                # needs qemu-system-riscv32
+arch/rv32-fpga-papiliolx6/fpga/build_sim.sh     # once: GHDL + Verilator
+python3 python/test_rv32_fpga_sim.py            # ends with *** ALL PASS *** (and checks that the SDRAM model saw no protocol error)
+python3 arch/rv32-fpga-papiliolx6/tools/memtest.py --port /dev/ttyUSB1   # on the board, right after the loader prints TZLD: write and read back the SDRAM
 ```
 
 PC-8801 has its own harness (it needs `wine` and `xvfb`, plus `M88.exe` and the ROM images in `~/work/pc88`):
@@ -346,6 +360,8 @@ Each prints `ok` / `FAIL` lines and `0 failure(s)` at the end. A new bytecode in
 | `arch/m68k-x68000/` | Sharp X68000 port (boot sector, IOCS console and disk, tests, `XM6.md`) |
 | `arch/m68k-mega/arduino/` | Firmware for the Arduino Mega2560 that drives the 68000's bus |
 | `arch/rpi-pico/` | Raspberry Pi Pico W port. The kernel is built with CMake against the Pico SDK (`CMakeLists.txt`); the Makefile drives that and builds the commands and the SD card image |
+| `arch/rv32-qemu/` | RISC-V (RV32IM, machine mode) on QEMU's `virt` machine: startup and trap entry (`crt0.S`), console, RAM disk, command loader |
+| `arch/rv32-fpga-papiliolx6/` | The same on a Papilio Pro FPGA. `fpga/` holds the Verilog/VHDL (the NEORV32 wrapper, the SDRAM controller, the top level, the testbench), `fpga/loader/` the boot loader, `tools/` the upload and memory-test scripts |
 | `user/` | Source for the commands, `sh` included |
 | `tzcc/` | tzcc, our C compiler for the Z80 (it also has an x86-64 backend, used only to test itself with `make x86test`) |
 | `python/` | Tests and debugging tools (`tz80.py` is a single-step Z80 debugger) |
@@ -358,6 +374,8 @@ Each prints `ok` / `FAIL` lines and `0 failure(s)` at the end. A new bytecode in
 - Only one pipe at a time, and at most 4KB goes through it (anything past that gets cut off).
 - m68k-x68000: it needs a 1MB X68000 at least, and it relies on the ROM's IOCS (console, floppy, and the 100Hz Timer-C tick), so it only boots from FDD0 with the IPL-ROM present. Details, the boot sequence and the IOCS facts we verified are in `arch/m68k-x68000/XM6.md`. Only FDD0 is a FAT volume: no hard disk, no RTC (the clock starts at 1970-01-01), RAM above 1MB is unused. It has only been run on XM6G, never on a real X68000. Other emulators (XEiJ, MAME, the MiSTer core) haven't been tried; reports are welcome. tizix doesn't use Human68k at all: it boots straight from the floppy's boot sector and talks to the ROM's IOCS, so Human68k programs won't run on it and it isn't a Human68k replacement.
 - m68k-mega: the Mega firmware's timer (Timer5) has to tick at the same rate as the kernel's `TICK_HZ` (25 by default).
+- rv32-fpga-papiliolx6: the SDRAM is empty at every power-up, so the kernel and the disk image go in over the UART each time (about a second at 2Mbaud). The disk is a RAM disk, so files do not survive a power cycle. In `miniterm` use `--raw --eol CR`: its default filter turns ESC into a picture (vi's screen never draws) and Enter sends CR+LF. `picocom -b 2000000 /dev/ttyUSB1` works as it is.
+- rv32-fpga-papiliolx6: the numbers in the scripts (`/mnt/sda1/...` for ISE and NEORV32) are from our machine; change them with `N32=` and the output directory arguments. The pin assignments (`fpga/papilio_pro.ucf`) were read off the Papilio Pro schematic and all work on a real board.
 
 ## Credits
 
@@ -505,6 +523,8 @@ openFPGALoader -c ft2232 --ftdi-channel 0 /path/to/out/top.bit
 python3 tools/upload.py <obj>/kernel.bin <obj>/disk.img --port /dev/ttyUSB1 --baud 2000000   # start this first, then write the bitstream: the loader prints TZLD only after a reset
 python3 -m serial.tools.miniterm --raw --eol CR /dev/ttyUSB1 2000000                           # the shell (Ctrl-] to quit)
 ```
+
+**Tried on** a Papilio Pro (Spartan-6 XC6SLX9-2, a 32MHz oscillator, a Micron MT48LC4M16 SDRAM, an FT2232 for the UART and JTAG) at 32, 64, 96 and 100MHz. The regression-style checks (commands, files, `vi`, pipes) pass on the board; a long stress run has not been done. Only this one board has been tried.
 
 Not done yet: booting without a host (the SPI flash on the board could hold the kernel and disk), a persistent disk (SD card), and a data cache or an open-row policy for the SDRAM, which is where most of the remaining speed is.
 
