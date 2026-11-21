@@ -53,9 +53,9 @@ OBJ := ../build/arch/$(ARCH)/user
 OPTOFF     := --nogcse --noinvariant --nolabelopt --noloopreverse --nooverlay
 CFLAGS_CMD := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
               $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=19 -DNO_HISTORY) \
-              $(if $(filter msx,$(ARCH)),-DNO_HISTORY)
+              $(if $(filter msx z80-trs80,$(ARCH)),-DNO_HISTORY)
 CFLAGS_DRV := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
-              $(if $(filter z80board,$(ARCH)),-DARCH_Z80BOARD) \
+              $(if $(filter z80board z80-ti84plus,$(ARCH)),-DARCH_Z80BOARD) \
               $(if $(filter z80-pc8801,$(ARCH)),-DARCH_PC8801)
 LDBASE     := -b _CODE=0x0000
 
@@ -77,7 +77,7 @@ CRT0     := crt0cmd
 #   wifi は z80board 専用(ESP-WROOM-02 へ AT コマンドを 1 行通すだけの小物。
 #   cpmsim の port 50/51 には AT パーサが居ないので z80pack では意味が無い)。
 COMMANDS := hello a b date_dbg rx cp_dbg test1 t2 blk wak ptx prx sh telnet net nettest tzftp atcli ntpdate \
-            $(if $(filter z80board,$(ARCH)),wifi)
+            $(if $(filter z80board z80-ti84plus,$(ARCH)),wifi)
 BINS := $(addprefix $(OBJ)/,$(addsuffix .bin,$(COMMANDS)))
 
 # ---- コマンド側リンクライブラリ（driver 常駐に依存しない純粋関数）----

@@ -1,0 +1,55 @@
+diff --git a/libz80e/src/runloop/runloop.c b/libz80e/src/runloop/runloop.c
+index ea81497..19963f4 100644
+--- a/libz80e/src/runloop/runloop.c
++++ b/libz80e/src/runloop/runloop.c
+@@ -87,14 +87,15 @@ int runloop_compare(const void *first, const void *second) {
+ 	return a->after_cycle - b->after_cycle;
+ }
+ 
++void (*z80e_link_tx_hook)(int c) = NULL;	/* tizix: the frontend receives the link assist TX bytes here */
++
+ void link_socket_update(asic_t *asic, int c) {
+ 	if (c != EOF) {
+-		char _c = ' ';
+-		if (isprint((char)c)) {
+-			_c = (char)c;
++		if (z80e_link_tx_hook) {
++			z80e_link_tx_hook(c);
++		} else {
++			printf("Asked to send %02X\n", c);
+ 		}
+-		// TODO: Log the TX better
+-		printf("Asked to send %02X (%c)\n", c, _c);
+ 	}
+ 
+ #ifndef NOLINK
+diff --git a/libz80e/src/ti/hardware/link.c b/libz80e/src/ti/hardware/link.c
+index 1a6dea1..ace459f 100644
+--- a/libz80e/src/ti/hardware/link.c
++++ b/libz80e/src/ti/hardware/link.c
+@@ -62,9 +62,6 @@ void write_link_assist_enable_port(void *device, uint8_t val) {
+ 		state->interrupts.mask = val;
+ 		state->asic->cpu->interrupt = (state->interrupts.tx && state->assist.status.int_tx_ready)
+ 			|| (state->interrupts.rx && state->assist.status.int_rx_ready);
+-		printf("Just wrote %02X to LA enable port\n", val);
+-		printf("rx int: %d tx int: %d\n",
+-				state->interrupts.rx, state->interrupts.tx);
+ 		break;
+ 	}
+ }
+@@ -154,7 +151,6 @@ bool link_recv_ready(asic_t *asic) {
+ }
+ 
+ bool link_recv_byte(asic_t *asic, uint8_t val) {
+-	printf("Receiving %02X via link port\n", val);
+ 	link_state_t *state = asic->cpu->devices[0x00].device;
+ 	if (!link_recv_ready(asic)) {
+ 		return false;
+@@ -163,7 +159,6 @@ bool link_recv_byte(asic_t *asic, uint8_t val) {
+ 	state->assist.rx_buffer = val;
+ 
+ 	if (!state->interrupts.disabled && state->interrupts.rx) {
+-		printf("Raising interrupt\n");
+ 		asic->cpu->interrupt = 1;
+ 	}
+ 	return true;
