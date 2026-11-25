@@ -101,3 +101,4 @@ arch/rv32-fpga-papiliolx6/fpga/loader/imem_image.vhd
 arch/z80-ti84plus/rom.bin
 arch/z80-ti84plus/flashdisk.img
 arch/z80-trs80/model4p/disks/
+arch/z80-zxspectrum/plus3/disks/

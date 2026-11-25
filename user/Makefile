@@ -53,7 +53,7 @@ OBJ := ../build/arch/$(ARCH)/user
 OPTOFF     := --nogcse --noinvariant --nolabelopt --noloopreverse --nooverlay
 CFLAGS_CMD := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
               $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=19 -DNO_HISTORY) \
-              $(if $(filter msx z80-trs80,$(ARCH)),-DNO_HISTORY)
+              $(if $(filter msx z80-trs80 z80-zxspectrum,$(ARCH)),-DNO_HISTORY)
 CFLAGS_DRV := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
               $(if $(filter z80board z80-ti84plus,$(ARCH)),-DARCH_Z80BOARD) \
               $(if $(filter z80-pc8801,$(ARCH)),-DARCH_PC8801)
