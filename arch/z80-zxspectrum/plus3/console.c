@@ -25,6 +25,10 @@ static void hi_cursor(void)  __naked { __asm jp 0xF009 __endasm; }
 static void hi_init(void)    __naked { __asm jp 0xF00C __endasm; }
 
 static unsigned char ccol, crow, in_esc, par[2], npar, inited, curon;
+/* set while con_putc runs.  show_cursor (always called with the interrupts off, from kgetchar's and con_break's loops)
+ * must not draw then: a process preempted in the middle of con_putc would later erase the cursor at its new column and
+ * leave the one drawn at the old column on the screen. */
+static volatile unsigned char busy;
 
 static void cell(unsigned char c, unsigned char row, unsigned char col)
 {
@@ -99,7 +103,9 @@ static void screen_putc(unsigned char c)
 
 void con_putc(char c)
 {
+    busy = 1;
     screen_putc((unsigned char)c);
+    busy = 0;
 }
 
 /* ------------------------------------------------------------------
@@ -215,7 +221,7 @@ static void kb_poll(void) __naked
 
 static void show_cursor(void)
 {
-    if (!curon && inited) {
+    if (!curon && inited && !busy) {
         curon = 1;
         HI_ROW = crow;
         HI_COL = ccol;
