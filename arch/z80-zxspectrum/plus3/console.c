@@ -8,8 +8,8 @@
  *     hi.s also keeps a text copy of the screen (the shadow, 32x24 bytes at 0xF400) which the test reads.
  *   Keyboard: the 8 half-rows (port 0xFE with the row in the high byte), scanned from the 50Hz frame ISR (kb_isr),
  *     edge detected, no key repeat.  Symbol Shift gives the printed symbols (as on the keycaps), Caps Shift + 5 6 7 8 are
- *     the cursor keys (ESC [ D B A C), Caps Shift + 0 = backspace, Caps Shift + Space = Break (^C), both shifts + a
- *     letter = control character.
+ *     the cursor keys (ESC [ D B A C), Caps Shift + 0 = backspace, Caps Shift + Space (BREAK) = ESC, both shifts + a
+ *     letter = control character (+ C = Break).  On MAME, tools/mamezx.lua turns the host's keys into these.
  * ------------------------------------------------------------------ */
 #define HI_C    (*(volatile unsigned char *)0xF3F0)
 #define HI_ROW  (*(volatile unsigned char *)0xF3F1)
@@ -168,7 +168,7 @@ static void kb_scan(void)
                 else if (r == 4 && i == 2) { kput(27); kput('['); k = 'C'; }      /* Caps + 8: right */
                 else if (r == 4 && i == 3) { kput(27); kput('['); k = 'A'; }      /* Caps + 7: up */
                 else if (r == 4 && i == 4) { kput(27); kput('['); k = 'B'; }      /* Caps + 6: down */
-                else if (r == 7 && i == 0) k = 3;                                 /* Caps + Space: Break */
+                else if (r == 7 && i == 0) k = 27;                                /* Caps + Space (BREAK): ESC */
                 else if (k >= 'a' && k <= 'z') k -= 32;
             } else if (cs && ss) {
                 if (kt[b] >= 'a' && kt[b] <= 'z') k = kt[b] & 0x1F;               /* both shifts + letter: control */

@@ -44,7 +44,9 @@
 #ifndef TROWS
 #define TROWS    23         /* 本文の表示行数 */
 #endif
+#ifndef TCOLS
 #define TCOLS    79         /* 1 行に出す最大桁数 */
+#endif
 
 /* getkey() が返す拡張キー。
  * 256 以上ではなく 0x81.. を使う: getchar() は 0..255 しか返さず、端末から
@@ -308,9 +310,12 @@ static void status(void)
     if (msgid == 1) prs(" saved");
     else if (msgid == 2) prs(" modified");
     else if (msgid == 3) prs(" cannot write");
+#ifndef VI_NO_NAME
     scr_col = 52;
     mvcur();
     prs(fname);
+#endif
+    /* VI_NO_NAME (narrow screens, e.g. the ZX Spectrum's 32 columns): no file name, which would wrap and scroll */
     if (dirty) prs(" [+]");
     /* 6(buffer full)は 0 に寄せた。ins_at が黙って拒否する = 打っても
      * 文字が増えないので、それ自体が合図になる。

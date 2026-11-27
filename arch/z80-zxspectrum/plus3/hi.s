@@ -24,6 +24,7 @@ D_BUF   = 0xF3E3
 D_CYL   = 0xF3E5
 D_RES   = 0xF3E6
 D_TRY   = 0xF3E7
+D_CNT   = 0xF3E8                ; sectors to transfer in one command (D_ID .. D_ID + D_CNT - 1, on one track)
 STK     = 0xF3E0                ; the private stack grows down from here (the disk variables above it are not on it)
 SHADOW  = 0xF400
 FONT    = 0xF800
@@ -249,15 +250,19 @@ rd:     ld      bc, #0x2FFD
         in      a, (c)
         ret
 
-; wait for the drive, then Sense Interrupt Status (two result bytes)
-sense:  ld      bc, #0x2FFD
-1$:     in      a, (c)
-        and     a, #0x01
-        jr      nz, 1$
-        ld      a, #0x08
+; after a seek or a recalibrate: Sense Interrupt Status until it reports the seek end (an "invalid" 0x80 means nothing
+; is pending yet: one result byte only).  ZEsarUX ends a seek at once; MAME takes the step time.
+sense:  ld      a, #0x08
         call    wr
         call    rd
-        jp      rd
+        ld      e, a
+        cp      a, #0x80
+        jr      z, sense
+        call    rd                      ; PCN
+        ld      a, e
+        and     a, #0x20
+        jr      z, sense
+        ret
 
 disk:
         ld      a, #0x08
@@ -309,7 +314,11 @@ seekd:  ld      a, (D_OP)
         call    wr
         ld      a, #2                   ; 512 bytes
         call    wr
-        ld      a, (D_ID)               ; end of track = this sector
+        ld      a, (D_CNT)              ; end of track = the last sector wanted: the controller reads the sectors one
+        ld      b, a                    ; after the other in one turn of the disk (one command per sector would wait
+        ld      a, (D_ID)               ; a whole turn for each, the next one having just passed the head)
+        add     a, b
+        dec     a
         call    wr
         ld      a, #0x2A
         call    wr
@@ -337,14 +346,23 @@ wrloop: ld      bc, #0x2FFD
         jr      wrloop
 xdone:  call    rd                      ; ST0
         ld      e, a
-        ld      d, #6                   ; ST1 ST2 C H R N
+        call    rd                      ; ST1
+        ld      l, a
+        ld      d, #5                   ; ST2 C H R N
 2$:     call    rd
         dec     d
         jr      nz, 2$
+        ; no terminal count on the +3: ending at the last sector may give "abnormal termination, end of cylinder"
+        ; (MAME does; ZEsarUX reports success)
         ld      a, e
         and     a, #0xC0
         jr      z, ok
-        xor     a, a
+        cp      a, #0x40
+        jr      nz, bad
+        ld      a, l
+        cp      a, #0x80
+        jr      z, ok
+bad:    xor     a, a
         ld      (D_CYL), a              ; recalibrate on the next try
         ld      a, (D_TRY)
         dec     a

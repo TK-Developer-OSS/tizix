@@ -13,17 +13,21 @@
 #define D_OP    (*(volatile unsigned char *)0xF3E2)
 #define D_BUF   (*(unsigned char * volatile *)0xF3E3)
 #define D_RES   (*(volatile unsigned char *)0xF3E6)
+#define D_CNT   (*(volatile unsigned char *)0xF3E8)
 
 static void hi_disk(void) __naked { __asm jp 0xF00F __endasm; }
 
-/* one 512B sector n (physical), op 0 = read, 1 = write.  Interrupts are off for the transfer.  0 = ok */
-static unsigned char sec512(unsigned n, unsigned char *buf, unsigned char op) __critical
+/* up to *cnt 512B sectors from physical sector n, op 0 = read, 1 = write, in one controller command (only to the end of
+ * the track; *cnt is set to the number done).  Interrupts are off for the transfer.  0 = ok */
+static unsigned char sectors(unsigned n, unsigned char *buf, unsigned char op, unsigned char *cnt) __critical
 {
     unsigned char trk = 0;
 
     while (n >= SPT) { n -= SPT; trk++; }
+    if (*cnt > SPT - (unsigned char)n) *cnt = SPT - (unsigned char)n;
     D_TRK = trk;
     D_ID = (unsigned char)n + 1;
+    D_CNT = *cnt;
     D_OP = op;
     D_BUF = buf;
     hi_disk();
@@ -36,11 +40,14 @@ DSTATUS disk_status(BYTE pdrv)     { (void)pdrv; return 0; }
 static DRESULT rw(BYTE *buff, unsigned lba, UINT count, unsigned char op)
 {
     unsigned n = 1 + lba;
+    unsigned char k;
 
-    while (count--) {
-        if (sec512(n, buff, op)) return RES_ERROR;
-        buff += 512;
-        n++;
+    while (count) {
+        k = count > SPT ? SPT : (unsigned char)count;
+        if (sectors(n, buff, op, &k)) return RES_ERROR;
+        buff += (unsigned)k << 9;
+        n += k;
+        count -= k;
     }
     return RES_OK;
 }

@@ -60,7 +60,11 @@ load:
         jr      nz, 1$
         ret
 
+; read one sector to hl.  A drive that is not up to speed yet (the motor was just turned on; MAME emulates the spin-up)
+; ends the command at once with "not ready": the result phase comes instead of the data, so read the result, wait a
+; little and try again.
 rsec:
+        push    hl
         ld      a, (cyl)
         ld      b, a
         ld      a, (trk)
@@ -103,6 +107,8 @@ rsec:
 3$:     ld      bc, #0x2FFD
 4$:     in      a, (c)
         jp      p, 4$
+        and     a, #0x20                ; still in the execution phase?
+        jr      z, 6$
         ld      b, #0x3F
         ini
         dec     de
@@ -113,7 +119,20 @@ rsec:
 5$:     call    rd
         dec     e
         jr      nz, 5$
+        pop     de
         ret
+6$:     ld      e, #7                   ; failed: read the result, wait, again
+7$:     call    rd
+        dec     e
+        jr      nz, 7$
+        pop     hl
+        push    hl
+        ld      de, #0
+8$:     dec     de
+        ld      a, d
+        or      a, e
+        jr      nz, 8$
+        jr      2$
 
 wr:     push    af
         ld      bc, #0x2FFD

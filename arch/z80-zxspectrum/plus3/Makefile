@@ -25,6 +25,8 @@ NSEC     = 254          # kernel image = 254 * 128B = 63.5 sectors of 512B, from
 DISK   = disks/disk3.dsk
 FATDSK = disks/fat.img
 
+# vi: 32 columns (31 written, the last one would scroll), no file name on the status line
+TZDEFS = -DTCOLS=31 -DVI_NO_NAME
 include ../../common-sdcc.mk
 
 $(OBJDIR)/boot.rel: boot.s | $(OBJDIR)
