@@ -60,6 +60,8 @@ BLK ST CMD ARGS
 
 ## Try it first
 
+**In your browser, nothing to install:** [tizix on an IBM PC XT](https://tk-developer-oss.github.io/tizix/web/ibm-pc-xt/) — the `x86-ia16` floppy booting on an emulated 8088 (4.77MHz, 256KB, CGA, 360KB floppy) in [PCjs](https://www.pcjs.org), with the open-source [GLaBIOS](https://github.com/640-KB/GLaBIOS). The shell, pipes and `vi` work. The page is in `web/ibm-pc-xt/`.
+
 If you just want to play with tizix, you don't need to clone anything or build anything — Docker is all it takes, and that includes Docker Desktop on Windows. The `tizix` image has prebuilt kernels, disk images and all three simulators. It doesn't include a compiler, so you can't `make` inside it. For that, see [Building](#building).
 
 To keep your files and changes between sessions, run the container in the background with a specific name. You can safely access it using `docker exec`.
@@ -386,7 +388,9 @@ tizix stands on the shoulders of others. Big thanks to:
 - **j80** (PC-8000 series emulator) by Shigekazu HIRAO (HAL8999) — we used it for our PC-8001 experiments (a ROM boot loader, the PC-8012-02 RAM board).
 - **XM6** by PI. (2001-2006, and again since 2022) and **XM6 TypeG** by GIMONS — the X68000 emulator the `m68k-x68000` port is developed and tested on. PI. also published the XM6 source, which we read to check how the FDC and the disk behave.
 - **[QEMU](https://www.qemu.org/)** and Espressif's fork of it (`qemu-system-xtensa -machine esp32`) — the simulator behind the `esp32-wroom-32e` regression tests; the plain QEMU also runs the `x86-ia16` ones.
-- **[PCjs](https://www.pcjs.org)** © 2012-2026 [Jeff Parsons](https://github.com/jeffpar) — the IBM PC emulator in the browser that `x86-ia16` was first run on an 8088 with.
+- **[PCjs](https://www.pcjs.org)** © 2012-2026 [Jeff Parsons](https://github.com/jeffpar) — the IBM PC emulator in the browser that `x86-ia16` was first run on an 8088 with, and that runs the browser demo (`web/ibm-pc-xt/`).
+- **[GLaBIOS](https://github.com/640-KB/GLaBIOS)** by 640KB (GPL v3) — the open-source PC/XT BIOS the browser demo boots with.
+- **[font8x8](https://github.com/dhepper/font8x8)** by Daniel Hepper (public domain) — the CGA font of the browser demo.
 - **[SDCC](https://sdcc.sourceforge.net/)** — the Small Device C Compiler, for the Z80 kernel and tools.
 - **[GCC](https://gcc.gnu.org/)** and **[GNU Binutils](https://www.gnu.org/software/binutils/)** — the m68k-elf toolchain and the host compiler.
 - **[mtools](https://www.gnu.org/software/mtools/)** and **[dosfstools](https://github.com/dosfstools/dosfstools)** — for building the FAT disk images.

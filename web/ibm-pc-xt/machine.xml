@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<machine id="tizix-xt" type="pcx86" border="1" pos="center" background="default">
+	<name pos="center">tizix on an IBM PC XT compatible (8088, 256KB, CGA, 360KB floppy)</name>
+	<computer id="xt-cga-256k" name="IBM PC XT"/>
+	<ram id="ramLow" addr="0x00000" test="false"/>
+	<rom id="romBIOS" addr="0xfe000" size="0x2000" file="glabios-0.4.2-8x.json"/>
+	<video id="videoCGA" model="cga" screenWidth="1280" screenHeight="800" fontROM="font8x8.json" pos="center" padding="8px">
+		<menu>
+			<title>Color Display</title>
+			<control type="container" pos="right">
+				<control type="button" binding="fullScreen" padLeft="8px;line-height:1em">Full Screen</control>
+			</control>
+		</menu>
+	</video>
+	<fdc id="fdcNEC" autoMount='{A:{name:"tizix",path:"tizix-xt.img"}}' pos="left" padLeft="8px" padBottom="8px">
+		<control type="list" binding="listDrives"/>
+		<control type="list" binding="listDisks"/>
+		<control type="button" binding="loadDisk">Load</control>
+		<control type="button" binding="saveDisk" padRight="8px">Save</control>
+		<control type="file" binding="mountDisk"/>
+	</fdc>
+	<cpu id="cpu8088" model="8088" pos="left" padLeft="8px" padBottom="8px">
+		<control type="button" binding="run">Run</control>
+		<control type="button" binding="reset">Reset</control>
+		<control type="button" binding="setSpeed">Speed</control>
+	</cpu>
+	<keyboard id="keyboard" model="us83">
+		<control type="button" binding="ctrl-alt-del" padLeft="8px" padBottom="8px">Ctrl-Alt-Del</control>
+	</keyboard>
+	<chipset id="chipset" model="5160" sw1="01001001"/>
+</machine>
