@@ -28,6 +28,7 @@ try:
     with open(tmp + "/lines", "w") as f:
         f.write("".join(l + "\n" for l, _ in tests))
     env = dict(os.environ, TZ_LINES=tmp + "/lines")
+    for k in ("DISPLAY", "WAYLAND_DISPLAY"): env.pop(k, None)   # with a display MAME (SDL) opens an empty full-screen window, even with -video none
     snap = ["-snapshot_directory", os.environ["CPC_SNAP"]] if os.environ.get("CPC_SNAP") else []
     if snap: env["TZ_SNAP"] = "1"
     out = subprocess.run([MAME, "cpc6128", "-flop1", tmp + "/cpc.dsk", "-video", "none", "-sound", "none", "-nothrottle"] + snap + [

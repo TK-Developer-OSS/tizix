@@ -53,7 +53,7 @@ OBJ := ../build/arch/$(ARCH)/user
 OPTOFF     := --nogcse --noinvariant --nolabelopt --noloopreverse --nooverlay
 # machines whose port 0x00 is not a console status (keyboard matrix etc.): the DRIVER asks the kernel's con_rx_ready
 # whether a key is waiting (getc_timeout, kbhit), or ESC alone never times out in vi
-CON_RX_KERNEL_ARCHS := z80-pc8801 msx z80-trs80 z80-zxspectrum z80-amstradcpc
+CON_RX_KERNEL_ARCHS := z80-pc8801 msx z80-trs80 z80-zxspectrum z80-amstradcpc z80-rc2014
 CFLAGS_CMD := -mz80 --reserve-regs-iy --sdcccall 0 $(OPTOFF) -S -I../src \
               $(if $(filter z80-pc8801,$(ARCH)),-DTROWS=19 -DNO_HISTORY) \
               $(if $(filter msx z80-trs80 z80-zxspectrum z80-amstradcpc,$(ARCH)),-DNO_HISTORY)

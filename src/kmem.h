@@ -319,7 +319,8 @@
  *   コード+データは 0xF00 未満であること(python/run_regress.sh のガードが見る)。
  *   (2026-09-19 訂正の経緯: 当初 GP4 を TMR_OUT と誤認していた。実際は
  *   GP4=Z80 HALT→PIC センス入力、GP5=タイマトグル出力。[[z80board-hw-io-map]]) */
-#if defined(ARCH_Z80BOARD)
+/* z80-rc2014: the same ring, filled by its SIO/2 receive interrupt (arch/z80-rc2014/romwbw/crt0.s). */
+#if defined(ARCH_Z80BOARD) || defined(ARCH_Z80_RC2014)
 #define KW_RXHEAD       0x8D96            /* ISR が書く現在位置 (1B) */
 #define KW_RXTAIL       0x8D97            /* 消費側が読む現在位置 (1B) */
 #define KW_RXBUF        0x9F00            /* unsigned char[256]。下位バイトは 0 であること */

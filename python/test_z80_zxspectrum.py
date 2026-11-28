@@ -38,6 +38,7 @@ try:
     with open(tmp + "/lines", "w") as f:
         f.write("".join(l + "\n" for l, _, _ in tests))
     env = dict(os.environ, TZ_LINES=tmp + "/lines", TZ_ZXBOOT=tmp + "/disk3.dsk")
+    for k in ("DISPLAY", "WAYLAND_DISPLAY"): env.pop(k, None)   # with a display MAME (SDL) opens an empty full-screen window, even with -video none
     out = subprocess.run(["nice", "-n", "19", "ionice", "-c3", MAME, "specpls3", "-flop", tmp + "/disk3.dsk",
                           "-video", "none", "-sound", "none", "-nothrottle", "-skip_gameinfo", "-autoboot_script", LUA],
                          env=env, capture_output=True, text=True, timeout=900).stdout
