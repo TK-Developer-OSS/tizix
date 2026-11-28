@@ -13,6 +13,7 @@
  *     tty_avail()              bytes waiting
  *     tty_drops()              bytes lost to a full ring since the last open
  */
+        .arch i8086,jumps       /* 8086 only: long conditional jumps as jcc-not + jmp, not the 386 0F 8x form */
         .code16
         .att_syntax prefix
 

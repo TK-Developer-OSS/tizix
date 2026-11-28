@@ -9,6 +9,7 @@
  *   タイマ: 8254 PIT ch0 100Hz -> IRQ0 -> INT 08h = _isr08(退避→pick→復帰)。
  *   syscall: INT 80h = _isr80 (AH=0 exit /1 putc /2 getc /3 getticks)。
  */
+	.arch i8086,jumps        /* 8086 only: a conditional jump out of short range becomes jcc-not + jmp, not the 386 0F 8x form (POP CS on an 8088) */
 	.code16
 	.intel_syntax noprefix
 	.section .text._start,"ax",@progbits

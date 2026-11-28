@@ -16,14 +16,19 @@ unsigned tz_irq_save(void);
 void tz_irq_restore(unsigned fl);
 void tz_halt(void);
 void tz_qemu_exit(void);
+unsigned tz_peekb(unsigned seg, unsigned off);
+void kb_set_us(void);
 
 int serial_ok;
 char kbd_buf[8];
 int kbd_buf_len;
 int kbd_buf_idx;
+char kb_xt;                             /* 1: PC/XT keyboard interface (8255, no 8042): see kb_poll */
 
 void con_init(void)
 {
+    unsigned c;
+
     /* detect a 16550: write test values to the scratch register (COM1+7) and read them back */
     serial_ok = 0;
     vattr = 7;
@@ -43,6 +48,13 @@ void con_init(void)
         tz_outb(0x3FB, 0x03);   /* 8N1, DLAB=0 */
         tz_outb(0x3FA, 0xC7);   /* FIFO on, cleared, 14 byte threshold */
         tz_outb(0x3FC, 0x0B);   /* DTR|RTS|OUT2 */
+    }
+    /* the BIOS model byte (F000:FFFE): 0xFF PC, 0xFE / 0xFB XT have the 8255 keyboard interface, not an 8042 */
+    c = tz_peekb(0xF000, 0xFFFE);
+    kb_xt = 0;
+    if (c == 0xFF || c == 0xFE || c == 0xFB) {
+        kb_xt = 1;
+        kb_set_us();
     }
     /* mask IRQ1 (keyboard) at the PIC: the BIOS INT 09h must not take it, kb_poll reads it */
     tz_outb(0x21, tz_inb(0x21) | 0x02);
@@ -239,6 +251,26 @@ void con_putc(char c)       /* gcc callers push a char without extending it: tak
 }
 
 /* ---- keyboard: 8042 polled directly (ports 0x60/0x64), scan code set 1, JIS layout ---- */
+/* PC/XT keyboards are the US 83-key layout: con_init patches the JIS tables below with these keys
+ * (scan code, unshifted, shifted), 0-terminated */
+unsigned char kb_us[] = {
+    0x03, 0x32, 0x40,
+    0x07, 0x36, 0x5E,
+    0x08, 0x37, 0x26,
+    0x09, 0x38, 0x2A,
+    0x0A, 0x39, 0x28,
+    0x0B, 0x30, 0x29,
+    0x0C, 0x2D, 0x5F,
+    0x0D, 0x3D, 0x2B,
+    0x1A, 0x5B, 0x7B,
+    0x1B, 0x5D, 0x7D,
+    0x27, 0x3B, 0x3A,
+    0x28, 0x27, 0x22,
+    0x29, 0x60, 0x7E,
+    0x2B, 0x5C, 0x7C,
+    0x00
+};
+
 unsigned char kb_norm[0x80] = {
     0x00, 0x1B, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x2D, 0x5E, 0x08, 0x09,
     0x71, 0x77, 0x65, 0x72, 0x74, 0x79, 0x75, 0x69, 0x6F, 0x70, 0x40, 0x5B, 0x0D, 0x00, 0x61, 0x73,
@@ -260,6 +292,16 @@ unsigned char kb_shift[0x80] = {
     0x00, 0x00, 0x00, 0x5F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7C, 0x00, 0x00,
 };
 
+void kb_set_us(void)
+{
+    unsigned i;
+
+    for (i = 0; kb_us[i]; i = i + 3) {
+        kb_norm[kb_us[i]] = kb_us[i + 1];
+        kb_shift[kb_us[i]] = kb_us[i + 2];
+    }
+}
+
 unsigned kb_pend;                       /* 0 = none, else (ah<<8)|al; al==0 is a special key */
 char kb_shift_on;
 char kb_ctrl_on;
@@ -272,8 +314,18 @@ void kb_poll(void)
 
     for (;;) {
         if (kb_pend) break;
-        if (!(tz_inb(0x64) & 0x01)) break;
-        sc = tz_inb(0x60);
+        if (kb_xt) {
+            /* PC/XT: no 8042 (port 0x64 reads 0xFF there). The scan code waits in port 0x60 (8255 port A) and
+             * reads 0 when there is none; pulsing port 0x61 bit 7 clears it and lets the next one in. */
+            sc = tz_inb(0x60);
+            if (sc == 0) break;
+            c = tz_inb(0x61);
+            tz_outb(0x61, c | 0x80);
+            tz_outb(0x61, c & 0x7F);
+        } else {
+            if (!(tz_inb(0x64) & 0x01)) break;
+            sc = tz_inb(0x60);
+        }
         if (sc == 0xE0) {
             kb_ext = 1;
             continue;
